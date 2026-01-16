@@ -9,13 +9,11 @@ import socket
 import time
 
 # Configuration du serveur
-# Bind to all interfaces so Hamachi/remote clients can reach us. To force a
-# specific IP (ex: your Hamachi address), set SERVER_HOST to that value.
 SERVER_HOST = '0.0.0.0'  # Écoute sur toutes les interfaces
 SERVER_PORT = 12345
 HEARTBEAT_TIMEOUT = 5  # secondes avant de considérer un client mort
 BROADCAST_RATE = 30    # paquets par seconde pour pousser l'état du monde
-TICK_SLEEP = 0.003     # petit sleep pour garder le CPU raisonnable
+TICK_SLEEP = 0.003     # petit sleep pour garder la charge raisonnable
 BUFFER_SIZE = 2048
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
