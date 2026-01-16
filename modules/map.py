@@ -1,27 +1,57 @@
+"""
+Module de gestion de la carte pour Delivery Rush
+Utilise PyTMX et PyScroll pour charger et afficher des cartes Tiled (.tmx)
+Gère le rendu, le scrolling et les dimensions de la carte.
+"""
+
 import pygame
+import pytmx
+import pyscroll
 
-# World Constants
-WORLD_WIDTH = 12000
-WORLD_HEIGHT = 12000
-TILE_SIZE = 100
-
-# Screen Constants (defaults, can be overridden)
-SCREEN_WIDTH = 800
-SCREEN_HEIGHT = 600
 
 class GameMap:
-    def __init__(self):
-        self.width = WORLD_WIDTH
-        self.height = WORLD_HEIGHT
-        self.tile_size = TILE_SIZE
+    """
+    Gestionnaire de carte Tiled pour le jeu
+    Charge et affiche la carte avec scrolling optimisé
+    """
+
+    def __init__(self, tmx_file, screen_size):
+        """
+        Initialisation de la carte
+        tmx_file: chemin vers le fichier .tmx de Tiled
+        screen_size: dimensions de l'écran (largeur, hauteur)
+        """
+        self.tmx_data = pytmx.util_pygame.load_pygame(tmx_file)  # Chargement des données TMX
+        self.map_data = pyscroll.data.TiledMapData(self.tmx_data)  # Données pour PyScroll
+        self.map_layer = pyscroll.BufferedRenderer(  # Renderer optimisé avec buffer
+            self.map_data,
+            screen_size
+        )
+        # Calcul des dimensions totales de la carte en pixels
+        self.width_px = self.tmx_data.width * self.tmx_data.tilewidth
+        self.height_px = self.tmx_data.height * self.tmx_data.tileheight
+
+    def draw(self, screen, camera_pos):
+        # Méthode de dessin de la carte centrée sur camera_pos
+        self.render(screen, camera_pos[0], camera_pos[1])
 
     def render(self, screen, camera_x, camera_y):
-        """Render the map grid."""
-        for x in range(0, self.width, self.tile_size):
-            for y in range(0, self.height, self.tile_size):
-                # Only draw visible tiles
-                screen_x = x - camera_x
-                screen_y = y - camera_y
-                if -self.tile_size < screen_x < SCREEN_WIDTH and -self.tile_size < screen_y < SCREEN_HEIGHT:
-                    color = (255, 255, 255) if (x // self.tile_size + y // self.tile_size) % 2 == 0 else (128, 128, 128)
-                    pygame.draw.rect(screen, color, (screen_x, screen_y, self.tile_size, self.tile_size))
+        """afficher la carte centrée sur (camera_x, camera_y).
+
+        Arguments:
+            screen: pygame Surface to draw onto
+            camera_x: top-left x coordinate of the camera
+            camera_y: top-left y coordinate of the camera
+        """
+        # pyscroll veut le centre de l'écran
+        center_x = camera_x + screen.get_width() // 2
+        center_y = camera_y + screen.get_height() // 2
+        self.map_layer.center((center_x, center_y))
+        # afficher la carte
+        try:
+            self.map_layer.draw(screen, screen.get_rect())
+        except TypeError:
+            self.map_layer.draw(screen)
+
+
+    

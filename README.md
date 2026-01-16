@@ -1,30 +1,31 @@
 # Delivery Rush
 
-A multiplayer delivery game built with Python and Pygame.
+Un jeu de livraison multijoueur construit avec Python et Pygame.
 
-## Project Structure
+## Structure du Projet
 
-- `main.py`: Main client application
-- `server.py`: UDP server for multiplayer
-- `modules/`: Game modules
-  - `config.py`: Game constants and utility functions
-  - `ui.py`: User interface (menu, IP input, game UI)
-  - `player.py`: Player class and network management
-  - `map.py`: Game map rendering
-  - `missions.py`: Mission system (placeholder)
-  - `sounds.py`: Sound manager (placeholder)
-- `assets/`: Game assets (images, sounds)
+- `main.py` : Application cliente principale
+- `server.py` : Serveur UDP pour le multijoueur
+- `player_config.json` : Configuration du joueur
+- `modules/` : Modules du jeu
+  - `player.py` : Classe joueur et gestion réseau
+  - `map.py` : Rendu de la carte du jeu
+  - `missions.py` : Système de missions (espace réservé)
+  - `network.py` : Gestion réseau
+  - `rendering.py` : Rendu et interface utilisateur
+  - `sounds.py` : Gestionnaire de sons (espace réservé)
+- `assets/` : Ressources du jeu (images, sons)
 
-## Getting Started
+## Démarrage
 
-1. Install dependencies: `pip install -r requirements.txt`
-2. Run the server: `python server.py`
-3. Run the client: `python main.py`
+1. Installez les dépendances : `pip install -r requirements.txt`
+2. Lancez le serveur : `python server.py`
+3. Lancez le client : `python main.py`
 
-## Features
+## Fonctionnalités
 
-- Top-down delivery gameplay
-- Multiplayer support (UDP)
-- Dynamic mission generation (planned)
-- Vehicle upgrades (planned)
-- Enemy AI (planned)
+- Gameplay de livraison vue du dessus
+- Support multijoueur (UDP)
+- Génération dynamique de missions (planifié)
+- Améliorations de véhicules (planifié)
+- IA ennemie (planifié)
