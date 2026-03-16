@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Delivery Rush — Un jeu de livraison multijoueur vue du dessus. Conduisez, livrez et dominez vos rivaux en ligne. Construit avec Python et Pygame." />
+  <meta name="keywords" content="Delivery Rush, jeu, livraison, multijoueur, Python, Pygame, top-down, voiture" />
+  <meta property="og:title" content="Delivery Rush — Livrez. Conduisez. Dominez." />
+  <meta property="og:description" content="Un jeu de livraison multijoueur vue du dessus. Construisez votre réputation de livreur le plus rapide de la ville." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://bindechH.github.io/Delivery_Rush/" />
+  <title>Delivery Rush — Livrez. Conduisez. Dominez.</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📦</text></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+  <!-- Navigation -->
+  <nav class="navbar" id="navbar">
+    <div class="nav-container">
+      <a href="#hero" class="nav-logo">
+        <span class="logo-icon">📦</span>
+        <span class="logo-text">DELIVERY RUSH</span>
+      </a>
+      <ul class="nav-links" id="nav-links">
+        <li><a href="#about">À propos</a></li>
+        <li><a href="#features">Fonctionnalités</a></li>
+        <li><a href="#how-to-play">Comment jouer</a></li>
+        <li><a href="#requirements">Configuration</a></li>
+        <li><a href="#download" class="nav-cta">Télécharger</a></li>
+      </ul>
+      <button class="hamburger" id="hamburger" aria-label="Menu" aria-expanded="false">
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
+    </div>
+  </nav>
+
+  <!-- Hero Section -->
+  <section class="hero" id="hero">
+    <div class="hero-bg">
+      <div class="hero-particles" id="particles"></div>
+      <div class="hero-gradient"></div>
+    </div>
+    <div class="hero-content">
+      <div class="hero-badge">🎮 Disponible gratuitement</div>
+      <h1 class="hero-title">
+        <span class="title-line">DELIVERY</span>
+        <span class="title-line accent">RUSH</span>
+      </h1>
+      <p class="hero-tagline">Un jeu de livraison multijoueur</p>
+      <p class="hero-sub">Livrez. Conduisez. Dominez.</p>
+      <div class="hero-buttons">
+        <a href="https://github.com/bindechH/Delivery_Rush" class="btn btn-primary" target="_blank" rel="noopener noreferrer">
+          <span class="btn-icon">⬇️</span> Télécharger
+        </a>
+        <a href="https://github.com/bindechH/Delivery_Rush" class="btn btn-secondary" target="_blank" rel="noopener noreferrer">
+          <span class="btn-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/>
+            </svg>
+          </span> Voir le code source
+        </a>
+      </div>
+      <div class="hero-stats">
+        <div class="stat">
+          <span class="stat-value">60</span>
+          <span class="stat-label">FPS</span>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat">
+          <span class="stat-value">12K</span>
+          <span class="stat-label">Monde (px)</span>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat">
+          <span class="stat-value">UDP</span>
+          <span class="stat-label">Multijoueur</span>
+        </div>
+      </div>
+    </div>
+    <div class="hero-scroll-hint">
+      <span>Défiler</span>
+      <div class="scroll-arrow">▼</div>
+    </div>
+  </section>
+
+  <!-- À propos Section -->
+  <section class="about section" id="about">
+    <div class="container">
+      <div class="section-header animate-on-scroll">
+        <span class="section-tag">À propos du jeu</span>
+        <h2 class="section-title">Une course contre la montre dans une ville en ébullition</h2>
+      </div>
+      <div class="about-grid">
+        <div class="about-text animate-on-scroll">
+          <p>
+            <strong>Delivery Rush</strong> est un jeu de livraison multijoueur vue du dessus, construit avec Python et Pygame.
+            Incarnez un livreur intrépide au volant d'un véhicule personnalisé, naviguez dans une immense carte urbaine
+            et complétez des missions de livraison avant vos adversaires.
+          </p>
+          <p>
+            Le jeu propose une physique de conduite réaliste avec accélération, freinage et dérapage,
+            un système de réseau UDP pour le jeu en ligne, et une carte scrollable de 12 000 × 12 000 pixels
+            créée avec l'éditeur Tiled.
+          </p>
+          <div class="about-tags">
+            <span class="tag">🏎️ Top-down</span>
+            <span class="tag">🌐 Multijoueur</span>
+            <span class="tag">📦 Livraison</span>
+            <span class="tag">🐍 Python</span>
+          </div>
+        </div>
+        <div class="about-cards animate-on-scroll">
+          <div class="about-card">
+            <div class="about-card-icon">🗺️</div>
+            <div>
+              <h3>Grande carte ouverte</h3>
+              <p>Explorez un monde de 12 000 × 12 000 pixels avec des rues, des bâtiments et des zones de livraison</p>
+            </div>
+          </div>
+          <div class="about-card">
+            <div class="about-card-icon">🚗</div>
+            <div>
+              <h3>Physique avancée</h3>
+              <p>Accélération, freinage et dérapage réalistes à 60 FPS pour une conduite immersive</p>
+            </div>
+          </div>
+          <div class="about-card">
+            <div class="about-card-icon">👥</div>
+            <div>
+              <h3>Multijoueur en temps réel</h3>
+              <p>Architecture client-serveur UDP pour jouer avec vos amis sans latence</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Fonctionnalités Section -->
+  <section class="features section" id="features">
+    <div class="container">
+      <div class="section-header animate-on-scroll">
+        <span class="section-tag">Fonctionnalités</span>
+        <h2 class="section-title">Tout ce qu'il faut pour une course épique</h2>
+      </div>
+      <div class="features-grid">
+
+        <div class="feature-card animate-on-scroll">
+          <div class="feature-icon">🚗</div>
+          <h3 class="feature-title">Conduite réaliste</h3>
+          <p class="feature-desc">Physique avancée avec accélération, freinage, traînée et dérapage pour une expérience de conduite authentique.</p>
+        </div>
+
+        <div class="feature-card animate-on-scroll">
+          <div class="feature-icon">🌐</div>
+          <h3 class="feature-title">Multijoueur en ligne</h3>
+          <p class="feature-desc">Jouez avec vos amis via un réseau UDP. Architecture client-serveur robuste avec synchronisation en temps réel.</p>
+        </div>
+
+        <div class="feature-card animate-on-scroll">
+          <div class="feature-icon">🗺️</div>
+          <h3 class="feature-title">Carte immersive</h3>
+          <p class="feature-desc">Grande carte scrollable de 12 000 × 12 000 pixels, créée avec Tiled et rendue via PyTMX et PyScroll.</p>
+        </div>
+
+        <div class="feature-card animate-on-scroll">
+          <div class="feature-icon">🎨</div>
+          <h3 class="feature-title">Personnalisation</h3>
+          <p class="feature-desc">Choisissez parmi plusieurs modèles (SUV, Supercar…) et couleurs de voiture avec 48 frames d'animation.</p>
+        </div>
+
+        <div class="feature-card animate-on-scroll coming-soon">
+          <div class="feature-icon">📦</div>
+          <h3 class="feature-title">Missions de livraison <span class="badge-soon">Bientôt</span></h3>
+          <p class="feature-desc">Système dynamique de missions de livraison avec génération procédurale de colis et objectifs variés.</p>
+        </div>
+
+        <div class="feature-card animate-on-scroll coming-soon">
+          <div class="feature-icon">🤖</div>
+          <h3 class="feature-title">IA ennemie <span class="badge-soon">Bientôt</span></h3>
+          <p class="feature-desc">Affrontez des adversaires contrôlés par l'IA qui tenteront de vous bloquer et de voler vos livraisons.</p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- Comment jouer Section -->
+  <section class="how-to-play section" id="how-to-play">
+    <div class="container">
+      <div class="section-header animate-on-scroll">
+        <span class="section-tag">Comment jouer</span>
+        <h2 class="section-title">Prêt à démarrer en 3 étapes</h2>
+      </div>
+      <div class="steps-grid">
+
+        <div class="step animate-on-scroll">
+          <div class="step-number">01</div>
+          <div class="step-content">
+            <div class="step-icon">🐍</div>
+            <h3>Installer les dépendances</h3>
+            <p>Assurez-vous d'avoir <strong>Python 3.8+</strong> installé, puis installez les dépendances du projet :</p>
+            <div class="code-block">
+              <div class="code-header">
+                <span class="code-lang">bash</span>
+                <button class="copy-btn" data-code="pip install -r requirements.txt" aria-label="Copier la commande">Copier</button>
+              </div>
+              <pre><code>pip install -r requirements.txt</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="step animate-on-scroll">
+          <div class="step-number">02</div>
+          <div class="step-content">
+            <div class="step-icon">🖥️</div>
+            <h3>Lancer le serveur</h3>
+            <p>Démarrez le serveur UDP qui gérera les connexions multijoueurs :</p>
+            <div class="code-block">
+              <div class="code-header">
+                <span class="code-lang">bash</span>
+                <button class="copy-btn" data-code="python server.py" aria-label="Copier la commande">Copier</button>
+              </div>
+              <pre><code>python server.py</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="step animate-on-scroll">
+          <div class="step-number">03</div>
+          <div class="step-content">
+            <div class="step-icon">🎮</div>
+            <h3>Lancer le jeu</h3>
+            <p>Lancez le client principal et commencez à jouer :</p>
+            <div class="code-block">
+              <div class="code-header">
+                <span class="code-lang">bash</span>
+                <button class="copy-btn" data-code="python main.py" aria-label="Copier la commande">Copier</button>
+              </div>
+              <pre><code>python main.py</code></pre>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <div class="controls-section animate-on-scroll">
+        <h3 class="controls-title">🕹️ Contrôles</h3>
+        <div class="controls-grid">
+          <div class="control-item">
+            <kbd>↑</kbd>
+            <span>Accélérer</span>
+          </div>
+          <div class="control-item">
+            <kbd>↓</kbd>
+            <span>Freiner / Reculer</span>
+          </div>
+          <div class="control-item">
+            <kbd>←</kbd> <kbd>→</kbd>
+            <span>Tourner</span>
+          </div>
+          <div class="control-item">
+            <kbd>Espace</kbd>
+            <span>Frein à main</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- Configuration système Section -->
+  <section class="requirements section" id="requirements">
+    <div class="container">
+      <div class="section-header animate-on-scroll">
+        <span class="section-tag">Configuration système</span>
+        <h2 class="section-title">Ce dont vous avez besoin</h2>
+      </div>
+      <div class="requirements-grid">
+
+        <div class="req-card animate-on-scroll">
+          <div class="req-icon">🐍</div>
+          <h3>Python</h3>
+          <p class="req-version">3.8 ou supérieur</p>
+          <p>Requis pour exécuter le jeu. Téléchargez Python sur <a href="https://python.org" target="_blank" rel="noopener noreferrer">python.org</a></p>
+        </div>
+
+        <div class="req-card animate-on-scroll">
+          <div class="req-icon">🎮</div>
+          <h3>Pygame</h3>
+          <p class="req-version">2.0+</p>
+          <p>Bibliothèque de développement de jeux 2D pour Python. Installée automatiquement via pip.</p>
+        </div>
+
+        <div class="req-card animate-on-scroll">
+          <div class="req-icon">🗺️</div>
+          <h3>PyTMX &amp; PyScroll</h3>
+          <p class="req-version">Dernière version</p>
+          <p>Pour le chargement des cartes Tiled et le rendu du scrolling de la carte du jeu.</p>
+        </div>
+
+        <div class="req-card animate-on-scroll">
+          <div class="req-icon">🌐</div>
+          <h3>Réseau</h3>
+          <p class="req-version">LAN / Internet</p>
+          <p>Connexion réseau nécessaire pour le mode multijoueur. Mode solo disponible localement.</p>
+        </div>
+
+      </div>
+
+      <div class="req-note animate-on-scroll">
+        <span class="req-note-icon">💡</span>
+        <p>Toutes les dépendances Python sont listées dans <code>requirements.txt</code> et peuvent être installées en une seule commande : <code>pip install -r requirements.txt</code></p>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- Téléchargement Section -->
+  <section class="download section" id="download">
+    <div class="container">
+      <div class="download-box animate-on-scroll">
+        <div class="download-content">
+          <div class="download-icon">📦</div>
+          <h2 class="download-title">Prêt à livrer ?</h2>
+          <p class="download-desc">Delivery Rush est entièrement <strong>gratuit et open source</strong>. Téléchargez le code source depuis GitHub et lancez-vous dans l'aventure !</p>
+          <div class="download-buttons">
+            <a href="https://github.com/bindechH/Delivery_Rush" class="btn btn-primary btn-large" target="_blank" rel="noopener noreferrer">
+              <span class="btn-icon">⬇️</span> Télécharger sur GitHub
+            </a>
+            <a href="https://github.com/bindechH/Delivery_Rush/archive/refs/heads/main.zip" class="btn btn-outline" target="_blank" rel="noopener noreferrer">
+              <span class="btn-icon">📁</span> Télécharger le ZIP
+            </a>
+          </div>
+          <div class="github-meta">
+            <a href="https://github.com/bindechH/Delivery_Rush" target="_blank" rel="noopener noreferrer" class="github-link">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/>
+              </svg>
+              bindechH/Delivery_Rush
+            </a>
+            <span class="github-meta-sep">·</span>
+            <span class="github-meta-item">⭐ Open Source</span>
+            <span class="github-meta-sep">·</span>
+            <span class="github-meta-item">🐍 Python</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <div class="footer-logo">
+            <span class="logo-icon">📦</span>
+            <span class="logo-text">DELIVERY RUSH</span>
+          </div>
+          <p class="footer-tagline">Un jeu de livraison multijoueur open source</p>
+          <p class="footer-copy">Delivery Rush © 2025 — Projet open source</p>
+        </div>
+        <div class="footer-links">
+          <h4>Liens</h4>
+          <ul>
+            <li><a href="https://github.com/bindechH/Delivery_Rush" target="_blank" rel="noopener noreferrer">Repository GitHub</a></li>
+            <li><a href="https://github.com/bindechH/Delivery_Rush/issues" target="_blank" rel="noopener noreferrer">Signaler un bug</a></li>
+            <li><a href="https://github.com/bindechH/Delivery_Rush/archive/refs/heads/main.zip" target="_blank" rel="noopener noreferrer">Télécharger le ZIP</a></li>
+          </ul>
+        </div>
+        <div class="footer-tech">
+          <h4>Technologies</h4>
+          <ul>
+            <li>🐍 Python 3.8+</li>
+            <li>🎮 Pygame</li>
+            <li>🗺️ PyTMX &amp; PyScroll</li>
+            <li>🌐 Réseau UDP</li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <p>Fait avec ❤️ en Python &amp; Pygame · <a href="https://github.com/bindechH/Delivery_Rush" target="_blank" rel="noopener noreferrer">GitHub</a></p>
+      </div>
+    </div>
+  </footer>
+
+  <script src="js/main.js"></script>
+</body>
+</html>
