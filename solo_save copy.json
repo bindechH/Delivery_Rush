@@ -1,5 +1,5 @@
 {
-  "username": "rayane 2",
+  "username": "francoise",
   "car_model": "COUPE",
   "car_color": "Magenta",
   "money": 99999999,
@@ -39,8 +39,8 @@
   ],
   "completed_missions": 3,
   "failed_missions": 0,
-  "total_distance": 224711.17272679022,
-  "x": 1072.0531026929727,
-  "y": 1011.7837748282421,
-  "angle": -318.7059902808023
+  "total_distance": 221418.66982029445,
+  "x": 200,
+  "y": 200,
+  "angle": -183.1276064541585
 }

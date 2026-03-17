@@ -1,0 +1,19 @@
+{
+  "salt": "c1cfe202c90ea8adfe184aa8c09e6393",
+  "password_hash": "52dd4f729e36ce7116b08948070dd24a963650a50d95adf1f825ba10ebb0e378",
+  "money": 9999990,
+  "owned_cars": [
+    {
+      "model": "MICRO",
+      "color": "White"
+    }
+  ],
+  "car_model": "SUPERCAR",
+  "car_color": "Black",
+  "completed_missions": 0,
+  "failed_missions": 0,
+  "last_x": 5399.193773864534,
+  "last_y": 6011.932571898735,
+  "last_angle": -3.6389836460484855,
+  "total_distance": 1526.305824446249
+}

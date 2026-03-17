@@ -485,7 +485,7 @@ class GameUI:
         car_key = tuple(car)  # Utiliser le tuple comme clé de dictionnaire
         if car_key not in self.car_images:
             image_path = resolve_car_frame_path(car[0], car[1], 0)
-            image = pygame.image.load(image_path)
+            image = pygame.image.load(image_path).convert_alpha()
             image = pygame.transform.scale(image, (self.player.size, self.player.size))
             self.car_images[car_key] = image
         return self.car_images[car_key]
@@ -500,7 +500,7 @@ class GameUI:
         idx = int((angle % 360) / 7.5) % 48
         if idx not in frames:
             image_path = resolve_car_frame_path(car[0], car[1], idx)
-            img = pygame.image.load(image_path)
+            img = pygame.image.load(image_path).convert_alpha()
             img = pygame.transform.scale(img, (self.player.size, self.player.size))
             frames[idx] = img
         return frames[idx]

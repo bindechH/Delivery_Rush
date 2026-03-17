@@ -122,7 +122,7 @@ class Player:
         frames = []
         for idx in range(48):
             path = resolve_car_frame_path(model, color, idx)
-            img = pygame.image.load(path)
+            img = pygame.image.load(path).convert_alpha()
             img = pygame.transform.scale(img, (self.size, self.size))
             frames.append(img)
         return frames
