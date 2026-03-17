@@ -487,7 +487,7 @@ class DeliveryRushServer:
             return
         progress = msg.get('data', {})
         pd = self.player_data[username]
-        for key in ('money', 'owned_cars', 'car_model', 'car_color', 'completed_missions', 'failed_missions', 'total_distance'):
+        for key in ('money', 'owned_cars', 'car_model', 'car_color', 'completed_missions', 'failed_missions', 'total_distance', 'last_x', 'last_y', 'last_angle'):
             if key in progress:
                 pd[key] = progress[key]
         self._save_player(username)

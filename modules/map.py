@@ -7,6 +7,7 @@ Gère le rendu, le scrolling et les collisions de la carte.
 import pygame
 import pytmx
 import pyscroll
+from .player import PLAYER_SIZE, HITBOX_SCALE
 
 
 class GameMap:
@@ -31,15 +32,22 @@ class GameMap:
         # Données utilisées par PyScroll
         self.map_data = pyscroll.data.TiledMapData(self.tmx_data)
 
-        # Renderer optimisé
+        # Zoom — handled by rendering to a smaller viewport then scaling up,
+        # NOT via pyscroll's built-in zoom (which causes sub-pixel rounding
+        # mismatch between map tiles and sprites).
+        self.zoom = zoom
+        self._screen_size = screen_size
+
+        # Viewport at 1:1 world scale (screen / zoom)
+        vw = max(1, int(screen_size[0] / self.zoom))
+        vh = max(1, int(screen_size[1] / self.zoom))
+
+        # Renderer at 1:1 scale, viewport-sized
         self.map_layer = pyscroll.BufferedRenderer(
             self.map_data,
-            screen_size
+            (vw, vh)
         )
-
-        # Zoom
-        self.zoom = zoom
-        self.map_layer.zoom = self.zoom
+        self._viewport = pygame.Surface((vw, vh))
 
         # Dimensions
         self.tile_width = self.tmx_data.tilewidth
@@ -51,6 +59,10 @@ class GameMap:
 
         # Debug collision display
         self.show_collisions = False
+
+        # Actual camera position after pyscroll's clamping (set in render())
+        self.actual_camera_x = 0
+        self.actual_camera_y = 0
 
         # -----------------------------
         # COLLISIONS (rects from collision_8 layer)
@@ -105,26 +117,44 @@ class GameMap:
     def set_zoom(self, zoom):
         """Change le zoom de la carte."""
         self.zoom = zoom
-        self.map_layer.zoom = self.zoom
+        vw = max(1, int(self._screen_size[0] / self.zoom))
+        vh = max(1, int(self._screen_size[1] / self.zoom))
+        self.map_layer = pyscroll.BufferedRenderer(
+            self.map_data,
+            (vw, vh)
+        )
+        self._viewport = pygame.Surface((vw, vh))
 
-    def render(self, screen, camera_x, camera_y):
+    def render(self, screen, focus_x, focus_y):
         """
-        Affiche la carte centrée sur (camera_x, camera_y)
+        Render the map centred on the world point (focus_x, focus_y).
+
+        The focus point is the world-space coordinate to centre the view on
+        (typically the player centre).  pyscroll handles border clamping
+        internally.  After this call, actual_camera_x/y hold the true
+        top-left world coordinate of the rendered viewport — this is the
+        SINGLE SOURCE OF TRUTH for the camera and must be used by all
+        sprite / overlay rendering.
         """
+        # Let pyscroll centre + clamp
+        self.map_layer.center((round(focus_x), round(focus_y)))
 
-        center_x = camera_x + screen.get_width() / (2.0 * self.zoom)
-        center_y = camera_y + screen.get_height() / (2.0 * self.zoom)
-
-        self.map_layer.center((center_x, center_y))
+        # Read back the ground-truth camera after clamping
+        self.actual_camera_x = self.map_layer.view_rect.left
+        self.actual_camera_y = self.map_layer.view_rect.top
 
         try:
-            self.map_layer.draw(screen, screen.get_rect())
+            self.map_layer.draw(self._viewport, self._viewport.get_rect())
         except TypeError:
-            self.map_layer.draw(screen)
+            self.map_layer.draw(self._viewport)
 
-        # Debug: afficher les collisions si activé
+        # Draw collisions on the viewport BEFORE scaling so they are
+        # pixel-perfect with the map tiles (both get scaled together).
         if self.show_collisions:
-            self.draw_collisions(screen, camera_x, camera_y)
+            self._draw_collisions_viewport(self.actual_camera_x, self.actual_camera_y)
+
+        # Scale 1:1 viewport up to the full screen
+        pygame.transform.scale(self._viewport, (screen.get_width(), screen.get_height()), screen)
 
     # -----------------------------
     # COLLISION CHECK
@@ -178,18 +208,51 @@ class GameMap:
     # DEBUG COLLISION
     # -----------------------------
 
-    def draw_collisions(self, screen, camera_x, camera_y):
+    def _draw_collisions_viewport(self, camera_x, camera_y):
         """
-        Affiche les rectangles de collision en rouge (debug)
+        Draw collision rects on the 1:1 viewport surface so they scale
+        together with the map tiles — guarantees pixel-perfect alignment.
         """
+        vw = self._viewport.get_width()
+        vh = self._viewport.get_height()
         for rect in self.collision_rects:
+            dx = rect.x - camera_x
+            dy = rect.y - camera_y
+            # Skip rects entirely off-viewport
+            if dx + rect.width < 0 or dy + rect.height < 0 or dx >= vw or dy >= vh:
+                continue
+            debug_rect = pygame.Rect(dx, dy, rect.width, rect.height)
+            pygame.draw.rect(self._viewport, (255, 0, 0), debug_rect, 1)
 
-            debug_rect = pygame.Rect(
-                int((rect.x - camera_x) * self.zoom),
-                int((rect.y - camera_y) * self.zoom),
-                int(rect.width * self.zoom),
-                int(rect.height * self.zoom)
-            )
+    def find_safe_spawn(self, x, y):
+        """Return (x, y) moved to the nearest position outside collision rects.
 
-            pygame.draw.rect(screen, (255, 0, 0), debug_rect, 2)
+        Checks outward in a spiral from the requested position until a
+        collision-free spot is found (max ~50 tile widths away).
+        """
+        hitbox_size = max(2, int(PLAYER_SIZE * HITBOX_SCALE))
+        offset = (PLAYER_SIZE - hitbox_size) / 2
+
+        def _collides(px, py):
+            r = pygame.Rect(int(px + offset), int(py + offset), hitbox_size, hitbox_size)
+            for c in self.collision_rects:
+                if r.colliderect(c):
+                    return True
+            return False
+
+        if not _collides(x, y):
+            return x, y
+
+        step = self.tile_width
+        for radius in range(1, 50):
+            for dx in range(-radius, radius + 1):
+                for dy in range(-radius, radius + 1):
+                    if abs(dx) != radius and abs(dy) != radius:
+                        continue
+                    nx = x + dx * step
+                    ny = y + dy * step
+                    if 0 <= nx <= self.width_px - PLAYER_SIZE and 0 <= ny <= self.height_px - PLAYER_SIZE:
+                        if not _collides(nx, ny):
+                            return nx, ny
+        return x, y  # fallback
 

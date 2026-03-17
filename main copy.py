@@ -11,8 +11,8 @@ from modules import (
     MainMenu, Player, GameMap, GameUI, NetworkClient, SoundManager, MissionSystem, PhoneUI
 )
 
-CONFIG_PATH = Path('config.json')
-SOLO_SAVE_PATH = Path('solo_save.json')
+CONFIG_PATH = Path('config copy.json')
+SOLO_SAVE_PATH = Path('solo_save copy.json')
 
 # ── Config (settings only) ──────────────────────────
 
@@ -145,17 +145,15 @@ def _send_player_position(network_client, player, username):
 
 def _receive_player_positions(network_client, other_players_dict, username):
     """
-    Reçoit et met à jour les positions des autres joueurs depuis le serveur.
-    Utilise l'interpolation pour lisser les positions entre les ticks serveur.
-    Retourne True si succès, False sinon.
+    Reçoit et met à jour les positions des autres joueurs depuis le serveur
+    Retourne True si succès, False sinon
     """
     success, positions = network_client.receive_states()
     if success is False:
         return False
-    # Toujours mettre à jour avec les positions interpolées (lissage entre ticks serveur)
-    interpolated = network_client.get_interpolated_players()
-    other_players_dict.clear()
-    other_players_dict.update(interpolated)
+    if success is True:
+        other_players_dict.clear()
+        other_players_dict.update(positions)
     return True
 
 
@@ -323,11 +321,8 @@ def main():
                     )
                     phone_ui = PhoneUI(current_w, current_h, mission_system)
                     player_obj = Player(multi_car, player_world)
-                    spawn_x = spd.get('last_x', 6000.0)
-                    spawn_y = spd.get('last_y', 6000.0)
-                    spawn_x, spawn_y = game_map.find_safe_spawn(spawn_x, spawn_y)
-                    player_obj.x = spawn_x
-                    player_obj.y = spawn_y
+                    player_obj.x = spd.get('last_x', 6000.0)
+                    player_obj.y = spd.get('last_y', 6000.0)
                     player_obj.angle = spd.get('last_angle', 0.0)
                     player_obj.distance_traveled = spd.get('total_distance', 0.0)
                     mp_username = getattr(menu, 'auth_username', '') or _cfg.get("multi", {}).get("username", USERNAME)
@@ -344,11 +339,8 @@ def main():
                     phone_ui = PhoneUI(current_w, current_h, mission_system)
                     solo_car = (solo.get("car_model", "MICRO"), solo.get("car_color", "White"))
                     player_obj = Player(solo_car, player_world)
-                    spawn_x = solo.get("x", 6000.0)
-                    spawn_y = solo.get("y", 6000.0)
-                    spawn_x, spawn_y = game_map.find_safe_spawn(spawn_x, spawn_y)
-                    player_obj.x = spawn_x
-                    player_obj.y = spawn_y
+                    player_obj.x = solo.get("x", 6000.0)
+                    player_obj.y = solo.get("y", 6000.0)
                     player_obj.angle = solo.get("angle", 0.0)
                     player_obj.distance_traveled = solo.get("total_distance", 0.0)
                     game_ui = GameUI(screen, font, small_font, player_obj, game_map, other_players, current_w, current_h, USERNAME, name_font, mission_system=mission_system, phone_ui=phone_ui)
@@ -372,10 +364,6 @@ def main():
                                         'car_color': game_ui.player.car[1],
                                         'completed_missions': mission_system.completed_count,
                                         'failed_missions': mission_system.failed_count,
-                                        'last_x': game_ui.player.x,
-                                        'last_y': game_ui.player.y,
-                                        'last_angle': game_ui.player.angle,
-                                        'total_distance': game_ui.player.distance_traveled,
                                     }
                                     network_client.send_save_progress(progress)
                                 else:

@@ -1,0 +1,18 @@
+{
+  "salt": "4e4f1651b63a7a9e1449055df444d487",
+  "password_hash": "ab6ea80d7a8a071bb1f6daa44cfccf38b5eb7530da94dc87069519428f4ac6f2",
+  "money": 0,
+  "owned_cars": [
+    {
+      "model": "MICRO",
+      "color": "White"
+    }
+  ],
+  "car_model": "COUPE",
+  "car_color": "Magenta",
+  "completed_missions": 0,
+  "failed_missions": 0,
+  "last_x": 6970.749517098157,
+  "last_y": 6052.144476503993,
+  "last_angle": 16.212540575444077
+}

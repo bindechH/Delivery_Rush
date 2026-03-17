@@ -24,12 +24,14 @@ class InterpolatedPlayer:
         self.y = 0
         self.angle = 0
         self.car = ('SUPERCAR', 'Black')
+        self.on_road = True
 
-    def add_state(self, x, y, angle, car=None):
+    def add_state(self, x, y, angle, car=None, on_road=True):
         t = time.monotonic()
         self.states.append((t, x, y, angle))
         if car:
             self.car = car
+        self.on_road = on_road
         # Garder seulement les 10 derniers états
         if len(self.states) > 10:
             self.states = self.states[-10:]
@@ -78,6 +80,7 @@ class InterpolatedPlayer:
             'y': self.y,
             'angle': self.angle,
             'car': self.car,
+            'on_road': self.on_road,
         }
 
 
@@ -269,7 +272,7 @@ class NetworkClient:
                 self.interpolated_players[username] = InterpolatedPlayer()
             ip = self.interpolated_players[username]
             if isinstance(data, dict):
-                ip.add_state(data.get('x', 0), data.get('y', 0), data.get('angle', 0), data.get('car'))
+                ip.add_state(data.get('x', 0), data.get('y', 0), data.get('angle', 0), data.get('car'), data.get('on_road', True))
             else:
                 ip.add_state(data[0] if len(data) > 0 else 0, data[1] if len(data) > 1 else 0, 0)
 

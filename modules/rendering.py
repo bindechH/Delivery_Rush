@@ -462,8 +462,8 @@ class GameUI:
         self.screen_width = screen_width
         self.screen_height = screen_height
         self.username = username
-        self.camera_x = self.player.x - self.screen_width // 2
-        self.camera_y = self.player.y - self.screen_height // 2
+        self.camera_x = 0
+        self.camera_y = 0
         # TAB-hold player list
         self.show_tab_list = False
         self.car_images = {}
@@ -506,16 +506,8 @@ class GameUI:
         return frames[idx]
 
     def update_camera(self):
-        """Centrer la caméra sur la position du joueur."""
-        zoom = getattr(self.game_map, 'zoom', 1.0)
-        self.camera_x = self.player.x + self.player.size / 2 - self.screen_width / (2.0 * zoom)
-        self.camera_y = self.player.y + self.player.size / 2 - self.screen_height / (2.0 * zoom)
-        # Clamp camera so top-left stays at (0,0) and doesn't go past map edges
-        if hasattr(self.game_map, 'width_px') and hasattr(self.game_map, 'height_px'):
-            max_cam_x = max(0, self.game_map.width_px - self.screen_width / zoom)
-            max_cam_y = max(0, self.game_map.height_px - self.screen_height / zoom)
-            self.camera_x = max(0, min(max_cam_x, self.camera_x))
-            self.camera_y = max(0, min(max_cam_y, self.camera_y))
+        """Camera is now set by pyscroll during _render_map(). Nothing to do."""
+        pass
 
     def handle_events(self, events):
         """Gérer les événements d'entrée du jeu."""
@@ -543,8 +535,13 @@ class GameUI:
         self._render_tab_list()
 
     def _render_map(self):
-        """Rendre la carte du jeu."""
-        self.game_map.render(self.screen, self.camera_x, self.camera_y)
+        """Render the map and set the camera from pyscroll's actual view."""
+        focus_x = self.player.x + self.player.size / 2
+        focus_y = self.player.y + self.player.size / 2
+        self.game_map.render(self.screen, focus_x, focus_y)
+        # Single source of truth: pyscroll's clamped camera
+        self.camera_x = self.game_map.actual_camera_x
+        self.camera_y = self.game_map.actual_camera_y
 
     def _render_other_players(self):
         """Afficher les autres joueurs en multijoueur (avec rotation si fournie)."""
@@ -569,6 +566,18 @@ class GameUI:
                 label_center_x = int(cx)
                 label_top_y = int(cy - raw_image.get_height() / 2 - 22)
                 draw_text_bg_center(self.screen, player_username, self.name_font, (255, 255, 255), label_center_x, label_top_y)
+                # Debug: draw other player hitbox
+                if getattr(self.game_map, 'show_collisions', False):
+                    hs = getattr(self.player, 'hitbox_scale', 0.175)
+                    hit_size = max(2, int(self.player.size * hs))
+                    hit_offset = (self.player.size - hit_size) / 2
+                    screen_rect = pygame.Rect(
+                        int((x + hit_offset - self.camera_x) * zoom),
+                        int((y + hit_offset - self.camera_y) * zoom),
+                        int(hit_size * zoom),
+                        int(hit_size * zoom)
+                    )
+                    pygame.draw.rect(self.screen, (255, 165, 0), screen_rect, 2)
 
     def _render_player(self):
         """Afficher le joueur local."""
