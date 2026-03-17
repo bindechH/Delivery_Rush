@@ -1,0 +1,46 @@
+{
+  "username": "maleine 2",
+  "car_model": "COUPE",
+  "car_color": "Magenta",
+  "money": 2122121222169,
+  "owned_cars": [
+    {
+      "model": "MICRO",
+      "color": "White"
+    },
+    {
+      "model": "COUPE",
+      "color": "Magenta"
+    },
+    {
+      "model": "SEDAN",
+      "color": "Red"
+    },
+    {
+      "model": "SUV",
+      "color": "Blue"
+    },
+    {
+      "model": "HATCHBACK",
+      "color": "Magenta"
+    },
+    {
+      "model": "VAN",
+      "color": "Black"
+    },
+    {
+      "model": "MINIVAN",
+      "color": "Magenta"
+    },
+    {
+      "model": "BOX TRUCK",
+      "color": "Black"
+    }
+  ],
+  "completed_missions": 3,
+  "failed_missions": 0,
+  "total_distance": 219739.3965669616,
+  "x": 6000.0,
+  "y": 6000.0,
+  "angle": 0.0
+}
