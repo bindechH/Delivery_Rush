@@ -1,0 +1,59 @@
+{
+  "salt": "b29c34b03b9753dfa03ba30b6a63a0ba",
+  "password_hash": "f3dbfb881f1fe3f8cfa58ee4b98699575b4c8a76ebf66fb043ddd5d5e121c58c",
+  "money": 68,
+  "owned_cars": [
+    {
+      "model": "MICRO",
+      "color": "White"
+    },
+    {
+      "model": "MICRO",
+      "color": "Blue"
+    },
+    {
+      "model": "MICRO",
+      "color": "Black"
+    },
+    {
+      "model": "MICRO",
+      "color": "Brown"
+    },
+    {
+      "model": "MICRO",
+      "color": "Green"
+    },
+    {
+      "model": "MICRO",
+      "color": "Magenta"
+    }
+  ],
+  "car_model": "MICRO",
+  "car_color": "Black",
+  "completed_missions": 1,
+  "failed_missions": 1,
+  "last_x": 3383.402396463714,
+  "last_y": 1313.9094217328998,
+  "last_angle": -1454.1812833429392,
+  "reputation": 3,
+  "unlock_state": {
+    "tier": "rookie",
+    "unlocked_types": [
+      "standard"
+    ],
+    "reputation": 3
+  },
+  "mission_stats": {
+    "current_streak": 1,
+    "best_streak": 1,
+    "bonus_earned": 0,
+    "penalty_taken": 576
+  },
+  "last_vehicle_class": "compact",
+  "audio_settings": {
+    "music_state": "mission",
+    "music_volume": 0.1,
+    "effects_volume": 0.1
+  },
+  "total_distance": 34051.71272163216
+}

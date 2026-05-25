@@ -1,0 +1,43 @@
+{
+  "money": 0,
+  "owned_cars": [
+    {
+      "model": "MICRO",
+      "color": "White"
+    },
+    {
+      "model": "MICRO",
+      "color": "Green"
+    }
+  ],
+  "car_model": "MICRO",
+  "car_color": "Green",
+  "completed_missions": 0,
+  "failed_missions": 0,
+  "reputation": 0,
+  "unlock_state": {
+    "tier": "rookie",
+    "unlocked_types": [
+      "standard"
+    ],
+    "reputation": 0
+  },
+  "mission_stats": {
+    "current_streak": 0,
+    "best_streak": 0,
+    "bonus_earned": 0,
+    "penalty_taken": 0
+  },
+  "last_vehicle_class": "compact",
+  "audio_settings": {
+    "music_state": "gameplay",
+    "music_volume": 0.0,
+    "effects_volume": 0.0
+  },
+  "total_distance": 13916.705652357761,
+  "last_x": 6952.339944091957,
+  "last_y": 950.1295514313613,
+  "last_angle": -787.5037250795492,
+  "salt": "574a2cb8499a9b2e6782ae2c5c28c22d",
+  "password_hash": "d31a0cae1321319031f02959571861d16059c6772f93169d20d4d061cee96781"
+}

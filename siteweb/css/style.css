@@ -139,6 +139,27 @@ h1, h2, h3 {
 }
 .nav-links .nav-cta:hover { background: var(--accent-light); color: var(--bg-dark); }
 
+/* Language toggle */
+.lang-toggle {
+  background: transparent;
+  border: 1px solid var(--border-glow);
+  color: var(--accent);
+  font-family: 'Rajdhani', sans-serif;
+  font-weight: 600;
+  font-size: 0.85rem;
+  letter-spacing: 0.05em;
+  padding: 5px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition), border-color var(--transition);
+  white-space: nowrap;
+}
+.lang-toggle:hover {
+  background: var(--accent);
+  color: var(--bg-dark);
+  border-color: var(--accent);
+}
+
 /* Hamburger */
 .hamburger {
   display: none;

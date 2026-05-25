@@ -1,0 +1,39 @@
+{
+  "money": 0,
+  "owned_cars": [
+    {
+      "model": "MICRO",
+      "color": "White"
+    }
+  ],
+  "car_model": "SEDAN",
+  "car_color": "Red",
+  "completed_missions": 0,
+  "failed_missions": 0,
+  "reputation": 0,
+  "unlock_state": {
+    "tier": "rookie",
+    "unlocked_types": [
+      "standard"
+    ],
+    "reputation": 0
+  },
+  "mission_stats": {
+    "current_streak": 0,
+    "best_streak": 0,
+    "bonus_earned": 0,
+    "penalty_taken": 0
+  },
+  "last_vehicle_class": "family",
+  "audio_settings": {
+    "music_state": "gameplay",
+    "music_volume": 0.1,
+    "effects_volume": 0.1
+  },
+  "total_distance": 305.13028396040795,
+  "last_x": 6298.62904629437,
+  "last_y": 6015.538926478291,
+  "last_angle": -20.42402408338185,
+  "salt": "1facdf0e8c7d01f11312cd07b9e4a51c",
+  "password_hash": "feb071e21b723f92e9d56882caaaaf3cb95e7a1c713a1f0103778c58fcf36bab"
+}

@@ -1,0 +1,39 @@
+{
+  "money": 204,
+  "owned_cars": [
+    {
+      "model": "MICRO",
+      "color": "White"
+    }
+  ],
+  "car_model": "SUPERCAR",
+  "car_color": "Red",
+  "completed_missions": 1,
+  "failed_missions": 0,
+  "reputation": 3,
+  "unlock_state": {
+    "tier": "rookie",
+    "unlocked_types": [
+      "standard"
+    ],
+    "reputation": 3
+  },
+  "mission_stats": {
+    "current_streak": 1,
+    "best_streak": 1,
+    "bonus_earned": 0,
+    "penalty_taken": 0
+  },
+  "last_vehicle_class": "super",
+  "audio_settings": {
+    "music_state": "gameplay",
+    "music_volume": 0.1,
+    "effects_volume": 0.1
+  },
+  "total_distance": 19178.722709098165,
+  "last_x": 3622.549118878438,
+  "last_y": 1648.4892135588789,
+  "last_angle": -721.0436993437263,
+  "salt": "a87098af066b29596a4d0d411ea471df",
+  "password_hash": "3ab51c1668a2c9188095e219777e0d01be1ee73468da2a46a62389234ddf8612"
+}

@@ -11,3 +11,4 @@ from .player import Player, VEHICLE_CATALOG, VEHICLE_COLORS  # Classe joueur + c
 from .rendering import MainMenu, GameUI, draw_text  # Interfaces utilisateur et rendu
 from .sounds import SoundManager       # Gestionnaire de sons et musique
 from .network import NetworkClient, InterpolatedPlayer  # Client réseau pour le multijoueur
+from .ia import AIManager, TrafficAI, PursuitAI, MapNavigator  # Systemes IA trafic/poursuite

@@ -9,7 +9,7 @@ import socket
 import time
 
 # Configuration réseau
-BUFFER_SIZE = 4096  # Taille maximale des paquets UDP
+BUFFER_SIZE = 8192  # Taille maximale des paquets UDP
 HANDSHAKE_TIMEOUT = 1.0  # Timeout pour le handshake initial
 MAX_RECV_BATCH = 10  # Évite une boucle infinie si trop de paquets
 INTERP_DELAY = 0.1  # Délai d'interpolation en secondes
@@ -24,12 +24,23 @@ class InterpolatedPlayer:
         self.y = 0
         self.angle = 0
         self.car = ('SUPERCAR', 'Black')
+        self.on_road = True
+        self.ai = False
+        self.ai_kind = None
+        self.ai_state = None
+        self.vehicle_class = ""
 
-    def add_state(self, x, y, angle, car=None):
+    def add_state(self, x, y, angle, car=None, on_road=True, ai=False, ai_kind=None, ai_state=None, vehicle_class=None):
         t = time.monotonic()
         self.states.append((t, x, y, angle))
         if car:
             self.car = car
+        self.on_road = on_road
+        self.ai = bool(ai)
+        self.ai_kind = ai_kind
+        self.ai_state = ai_state
+        if vehicle_class is not None:
+            self.vehicle_class = str(vehicle_class)
         # Garder seulement les 10 derniers états
         if len(self.states) > 10:
             self.states = self.states[-10:]
@@ -78,6 +89,11 @@ class InterpolatedPlayer:
             'y': self.y,
             'angle': self.angle,
             'car': self.car,
+            'on_road': self.on_road,
+            'ai': self.ai,
+            'ai_kind': self.ai_kind,
+            'ai_state': self.ai_state,
+            'vehicle_class': self.vehicle_class,
         }
 
 
@@ -102,6 +118,10 @@ class NetworkClient:
         self.server_missions = []      # Missions générées par le serveur
         self.server_player_data = None # Données joueur reçues du serveur
         self.coop_notifications = []   # Notifications coop
+        self.mission_denials = []      # Refus de mission renvoyés par le serveur
+        self.leaderboard_top10 = []    # Classement serveur
+        self.party_state = {'my_party': None, 'parties': {}}
+        self.party_events = []
 
     def _reset_socket(self):
         """Réinitialise le socket UDP pour une nouvelle connexion"""
@@ -173,6 +193,7 @@ class NetworkClient:
         """
         if not self.sock or not player:
             return
+        vehicle_profile = player.get_vehicle_profile() if hasattr(player, 'get_vehicle_profile') else {}
         pkt = json.dumps({
             'type': 'state',
             'username': self.username,
@@ -180,7 +201,9 @@ class NetworkClient:
             'y': player.y,
             'angle': getattr(player, 'angle', 0.0),
             'car': player.car,
-            'on_road': getattr(player, 'on_road', True)
+            'on_road': getattr(player, 'on_road', True),
+            'vehicle_class': vehicle_profile.get('vehicle_class', ''),
+            'cargo_capacity': vehicle_profile.get('cargo_capacity', 0),
         }).encode()
         try:
             self.sock.sendto(pkt, (self.server_ip, self.server_port))
@@ -247,10 +270,27 @@ class NetworkClient:
                         self.chat_messages = self.chat_messages[-50:]
                 elif msg_type == 'mission_broadcast':
                     self.pending_mission_data = msg.get('data')
+                elif msg_type == 'mission_denied':
+                    self.mission_denials.append(msg)
+                    if len(self.mission_denials) > 20:
+                        self.mission_denials = self.mission_denials[-20:]
                 elif msg_type == 'mission_list':
                     self.server_missions = msg.get('missions', [])
                 elif msg_type == 'coop_activated':
                     self.coop_notifications.append(msg)
+                elif msg_type == 'leaderboard_data':
+                    self.leaderboard_top10 = list(msg.get('top10', []) or [])
+                elif msg_type == 'party_data':
+                    self.party_state = {
+                        'my_party': msg.get('my_party'),
+                        'parties': msg.get('parties', {}) or {},
+                        'reason': msg.get('reason', 'update'),
+                        'updated_at': time.monotonic(),
+                    }
+                elif msg_type == 'party_event':
+                    self.party_events.append(msg)
+                    if len(self.party_events) > 20:
+                        self.party_events = self.party_events[-20:]
         except BlockingIOError:
             pass  # Pas de données disponibles (normal en mode non-bloquant)
         except Exception as e:
@@ -269,7 +309,17 @@ class NetworkClient:
                 self.interpolated_players[username] = InterpolatedPlayer()
             ip = self.interpolated_players[username]
             if isinstance(data, dict):
-                ip.add_state(data.get('x', 0), data.get('y', 0), data.get('angle', 0), data.get('car'))
+                ip.add_state(
+                    data.get('x', 0),
+                    data.get('y', 0),
+                    data.get('angle', 0),
+                    data.get('car'),
+                    data.get('on_road', True),
+                    data.get('ai', False),
+                    data.get('ai_kind'),
+                    data.get('ai_state'),
+                    data.get('vehicle_class', ''),
+                )
             else:
                 ip.add_state(data[0] if len(data) > 0 else 0, data[1] if len(data) > 1 else 0, 0)
 
@@ -288,7 +338,15 @@ class NetworkClient:
             result[username] = ip.to_dict()
         return result
 
-    def send_mission_event(self, event_type, mission_data=None):
+    def receive_world_entities(self):
+        """Retourne les entités IA interpolées (compatibilité HUD/logic monde)."""
+        entities = {}
+        for username, data in self.get_interpolated_players().items():
+            if isinstance(data, dict) and data.get('ai', False):
+                entities[username] = data
+        return entities
+
+    def send_mission_event(self, event_type, mission_data=None, equipped_car=None):
         """
         Envoie un événement mission au serveur.
         event_type: 'mission_complete', 'mission_accept', 'mission_fail'
@@ -299,7 +357,8 @@ class NetworkClient:
             'type': 'mission_event',
             'username': self.username,
             'event': event_type,
-            'data': mission_data or {}
+            'data': mission_data or {},
+            'equipped_car': equipped_car or self.car,
         }).encode()
         try:
             self.sock.sendto(pkt, (self.server_ip, self.server_port))
@@ -334,19 +393,91 @@ class NetworkClient:
         except Exception as e:
             print(f"Envoi coop_join échoué : {e}")
 
-    def send_save_progress(self, progress_data):
-        """Envoie la progression du joueur au serveur pour sauvegarde."""
-        if not self.sock or not self.username:
+    def request_leaderboard(self):
+        if not self.sock:
             return
         pkt = json.dumps({
-            'type': 'save_progress',
+            'type': 'leaderboard_request',
             'username': self.username,
-            'data': progress_data,
         }).encode()
         try:
             self.sock.sendto(pkt, (self.server_ip, self.server_port))
         except Exception as e:
-            print(f"Envoi save_progress échoué : {e}")
+            print(f"Demande leaderboard échouée : {e}")
+
+    def request_party_state(self):
+        if not self.sock:
+            return
+        pkt = json.dumps({
+            'type': 'party_state_request',
+            'username': self.username,
+        }).encode()
+        try:
+            self.sock.sendto(pkt, (self.server_ip, self.server_port))
+        except Exception as e:
+            print(f"Demande état party échouée : {e}")
+
+    def create_party(self):
+        if not self.sock:
+            return
+        pkt = json.dumps({
+            'type': 'party_create',
+            'username': self.username,
+        }).encode()
+        try:
+            self.sock.sendto(pkt, (self.server_ip, self.server_port))
+        except Exception as e:
+            print(f"Création party échouée : {e}")
+
+    def join_party(self, leader_username=None, party_id=None):
+        if not self.sock:
+            return
+        pkt = json.dumps({
+            'type': 'party_join',
+            'username': self.username,
+            'leader': leader_username,
+            'party_id': party_id,
+        }).encode()
+        try:
+            self.sock.sendto(pkt, (self.server_ip, self.server_port))
+        except Exception as e:
+            print(f"Join party échoué : {e}")
+
+    def leave_party(self):
+        if not self.sock:
+            return
+        pkt = json.dumps({
+            'type': 'party_leave',
+            'username': self.username,
+        }).encode()
+        try:
+            self.sock.sendto(pkt, (self.server_ip, self.server_port))
+        except Exception as e:
+            print(f"Sortie party échouée : {e}")
+
+    def get_party_lookup(self):
+        """Retourne un mapping username -> party_id à partir de l'état connu."""
+        lookup = {}
+        parties = self.party_state.get('parties', {}) if isinstance(self.party_state, dict) else {}
+        for party_id, pdata in parties.items():
+            if not isinstance(pdata, dict):
+                continue
+            for member in pdata.get('members', []) or []:
+                lookup[str(member)] = str(party_id)
+        return lookup
+
+    def get_my_party_challenge(self):
+        """Retourne le challenge party actuel du joueur local si disponible."""
+        if not isinstance(self.party_state, dict):
+            return None
+        party_id = self.party_state.get('my_party')
+        if not party_id:
+            return None
+        pdata = (self.party_state.get('parties', {}) or {}).get(str(party_id), {})
+        if not isinstance(pdata, dict):
+            return None
+        challenge = pdata.get('challenge')
+        return challenge if isinstance(challenge, dict) else None
 
     def close(self):
         """Ferme proprement la connexion réseau"""

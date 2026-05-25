@@ -7,8 +7,10 @@ import json
 from pathlib import Path
 import pygame
 import sys
+from modules.translate import normalize_language, tr
+from modules.player import sanitize_car
 from modules import (
-    MainMenu, Player, GameMap, GameUI, NetworkClient, SoundManager, MissionSystem, PhoneUI
+    MainMenu, Player, GameMap, GameUI, NetworkClient, SoundManager, MissionSystem, PhoneUI, AIManager
 )
 
 CONFIG_PATH = Path('config.json')
@@ -21,12 +23,16 @@ _CONFIG_DEFAULTS = {
     "fullscreen": False,
     "fps": 60,
     "map_zoom": 2.0,
+    "volume": 0.25,
+    "music_volume": 0.25,
+    "effects_volume": 0.75,
+    "robber_difficulty": 4,
+    "language": "fr",
     "server_ip": "127.0.0.1",
     "server_port": 12345,
     "multi": {
         "username": "",
-        "password": "",
-    },
+        "password": "",    },
 }
 
 # ── Solo save (game state) ──────────────────────────
@@ -39,7 +45,23 @@ _SOLO_DEFAULTS = {
     "owned_cars": [{"model": "MICRO", "color": "White"}],
     "completed_missions": 0,
     "failed_missions": 0,
+    "reputation": 0,
+    "unlock_state": {
+        "tier": "rookie",
+        "unlocked_types": ["standard"],
+        "reputation": 0,
+    },
+    "mission_stats": {
+        "current_streak": 0,
+        "best_streak": 0,
+        "bonus_earned": 0,
+        "penalty_taken": 0,
+    },
     "total_distance": 0.0,
+    "last_vehicle_class": "compact",
+    "audio_settings": {
+        "music_state": "menu",
+    },
     "x": 6000.0,
     "y": 6000.0,
     "angle": 0.0,
@@ -82,6 +104,10 @@ def _migrate_old_config():
     for k in ("resolution", "fullscreen", "fps", "server_ip", "server_port"):
         if k in legacy:
             cfg[k] = legacy[k]
+    if "volume" in legacy:
+        cfg["volume"] = legacy["volume"]
+        cfg["music_volume"] = legacy["volume"]
+        cfg["effects_volume"] = legacy["volume"]
     if "multi" in legacy:
         cfg["multi"] = legacy["multi"]
     _save_json(CONFIG_PATH, cfg)
@@ -100,10 +126,20 @@ _migrate_old_config()
 _cfg = _load_json(CONFIG_PATH, _CONFIG_DEFAULTS)
 _solo = _load_json(SOLO_SAVE_PATH, _SOLO_DEFAULTS)
 
+if "music_volume" not in _cfg:
+    _cfg["music_volume"] = float(_cfg.get("volume", 0.25))
+if "effects_volume" not in _cfg:
+    _cfg["effects_volume"] = 0.75
+if "language" not in _cfg:
+    _cfg["language"] = "fr"
+_cfg["language"] = normalize_language(_cfg.get("language", "fr"))
+if "robber_difficulty" not in _cfg:
+    _cfg["robber_difficulty"] = 4
+
 SERVER_IP = _cfg["server_ip"]
 SERVER_PORT = _cfg["server_port"]
 USERNAME = _solo["username"]
-CAR = (_solo["car_model"], _solo["car_color"])
+CAR = sanitize_car((_solo["car_model"], _solo["car_color"]))
 
 # États du jeu - constantes pour les modes d'affichage
 MENU = 0  # Écran du menu principal
@@ -115,7 +151,47 @@ SCREEN_HEIGHT = _cfg["resolution"][1]
 FULLSCREEN = _cfg.get("fullscreen", False)
 FPS = _cfg.get("fps", 60)
 MAP_ZOOM = _cfg.get("map_zoom", 2.0)
-MENU_MUSIC = "assets/sounds/ambiance.mp3"
+ROBBER_DANGER_RADIUS = 320.0
+
+
+def _clamp_int(value, lo, hi, fallback):
+    try:
+        parsed = int(value)
+    except Exception:
+        parsed = int(fallback)
+    return max(int(lo), min(int(hi), parsed))
+
+
+def _robbery_fill_rate_per_second(difficulty_rank):
+    rank = _clamp_int(difficulty_rank, 1, 10, 4)
+    fill_seconds = max(2.6, 8.5 - (rank - 1) * 0.58)
+    return 1.0 / fill_seconds
+
+
+def _pick_existing_track(*candidates):
+    for candidate in candidates:
+        if candidate and Path(candidate).exists():
+            return candidate
+    return ""
+
+
+MENU_MUSIC = _pick_existing_track(
+    "assets/music/menu_music.mp3",
+    "assets/sounds/menu_music.mp3",
+    "assets/sounds/ambiance.mp3",
+)
+MISSION_MUSIC = _pick_existing_track(
+    "assets/music/mission_music.mp3",
+    "assets/sounds/mission_music.mp3",
+    "assets/sounds/ambiance.mp3",
+)
+CITY_AMBIENCE = _pick_existing_track(
+    "assets/music/city_ambiant.mp3",
+    "assets/sounds/city_ambience.mp3",
+    "assets/sounds/city_ambience.ogg",
+    "assets/sounds/city_ambience.wav",
+    "assets/sounds/ambiance.mp3",
+)
 
 
 
@@ -145,15 +221,17 @@ def _send_player_position(network_client, player, username):
 
 def _receive_player_positions(network_client, other_players_dict, username):
     """
-    Reçoit et met à jour les positions des autres joueurs depuis le serveur
-    Retourne True si succès, False sinon
+    Reçoit et met à jour les positions des autres joueurs depuis le serveur.
+    Utilise l'interpolation pour lisser les positions entre les ticks serveur.
+    Retourne True si succès, False sinon.
     """
     success, positions = network_client.receive_states()
     if success is False:
         return False
-    if success is True:
-        other_players_dict.clear()
-        other_players_dict.update(positions)
+    # Toujours mettre à jour avec les positions interpolées (lissage entre ticks serveur)
+    interpolated = network_client.get_interpolated_players()
+    other_players_dict.clear()
+    other_players_dict.update(interpolated)
     return True
 
 
@@ -168,6 +246,7 @@ def main():
     server_ip = SERVER_IP
     server_port = SERVER_PORT
     fps = FPS
+    language = normalize_language(_cfg.get("language", "fr"))
     flags = pygame.FULLSCREEN if FULLSCREEN else pygame.RESIZABLE
     screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), flags)
     pygame.display.set_caption("Delivery Rush")
@@ -184,11 +263,33 @@ def main():
 
     # Initialisation du gestionnaire de sons et musique du menu
     sound_manager = SoundManager()
-    sound_manager.play_music(MENU_MUSIC, volume=0.1)  # Volume réduit pour le menu
+    sound_manager.set_music_volume(_cfg.get("music_volume", _cfg.get("volume", 0.25)))
+    if hasattr(sound_manager, "set_effects_volume"):
+        sound_manager.set_effects_volume(_cfg.get("effects_volume", 0.75))
+    sound_manager.set_music_state("menu")
+    if MENU_MUSIC:
+        sound_manager.play_music(MENU_MUSIC, volume=1.0)
+    else:
+        sound_manager.stop_music()
 
     # Initialisation des composants principaux du jeu
     map_zoom = _cfg.get("map_zoom", 2.0)
-    menu = MainMenu(screen, font, small_font, current_w, current_h, server_ip, USERNAME, CAR, sound_manager, fullscreen=is_fullscreen, map_zoom=map_zoom)
+    menu = MainMenu(
+        screen,
+        font,
+        small_font,
+        current_w,
+        current_h,
+        server_ip,
+        USERNAME,
+        CAR,
+        sound_manager,
+        fullscreen=is_fullscreen,
+        map_zoom=map_zoom,
+        music_volume=_cfg.get("music_volume", _cfg.get("volume", 0.25)),
+        effects_volume=_cfg.get("effects_volume", 0.75),
+        language=language,
+    )
     game_map = GameMap(
         "assets/map/maps/deliveryrush_map.tmx",
         (current_w, current_h),
@@ -206,9 +307,25 @@ def main():
 
     # Variables de réseau pour le multijoueur
     network_client = None  # Client réseau (None si pas connecté)
-    other_players = {}  # Dictionnaire des autres joueurs {username: {x, y, angle, car}}
+    other_players = {}  # Vue fusionnée pour rendu/collisions (joueurs distants + IA)
+    remote_players = {}  # Joueurs distants uniquement (réseau)
+    ai_manager = None  # IA locale (solo)
+    ai_tick_rate = 8.0
+    ai_tick_interval = 1.0 / ai_tick_rate
+    ai_tick_accumulator = 0.0
+    ai_world_cache = {}
+    game_music_track = MENU_MUSIC
     connection_errors = 0  # Compteur d'erreurs de connexion consécutives
     MAX_CONNECTION_ERRORS = 3  # Nombre max d'erreurs avant déconnexion automatique
+    drift_sound_active = False
+    handbrake_sound_latch = False
+    last_collision_count = 0
+    collision_sound_cooldown = 0.0
+    robber_difficulty = _clamp_int(_cfg.get("robber_difficulty", 4), 1, 10, 4)
+    robbery_fill_rate = _robbery_fill_rate_per_second(robber_difficulty)
+    robber_target_count = robber_difficulty
+    robbery_pressure = 0.0
+    robbery_close_count = 0
 
     # === BOUCLE PRINCIPALE DU JEU ===
     while running:
@@ -262,6 +379,17 @@ def main():
                     _cfg["map_zoom"] = new_zoom
                     _cfg["resolution"] = list(new_res)
                     _cfg["fullscreen"] = new_fs
+                    language = normalize_language(sd.get("language", language))
+                    _cfg["language"] = language
+                    menu.language = language
+                    new_music_vol = float(sd.get("music_volume", _cfg.get("music_volume", 0.25)))
+                    new_effects_vol = float(sd.get("effects_volume", _cfg.get("effects_volume", 0.75)))
+                    _cfg["music_volume"] = new_music_vol
+                    _cfg["effects_volume"] = new_effects_vol
+                    _cfg["volume"] = new_music_vol
+                    sound_manager.set_music_volume(new_music_vol)
+                    if hasattr(sound_manager, "set_effects_volume"):
+                        sound_manager.set_effects_volume(new_effects_vol)
                     _save_json(CONFIG_PATH, _cfg)
                     # Apply map zoom
                     if new_zoom != map_zoom:
@@ -288,7 +416,7 @@ def main():
                         state = GAME
                     else:
                         menu.auth_open = True
-                        menu.auth_error = f"Échec : {reason}"
+                        menu.auth_error = tr(language, "menu.net_error", reason=reason)
                         multiplayer = False
                         network_client = None
                     continue
@@ -306,44 +434,188 @@ def main():
             # Initialisation de l'interface de jeu si nécessaire
             if game_ui is None:
                 print(f"Entrée en mode jeu, multijoueur={multiplayer}")
+                if not multiplayer:
+                    # simple loading screen: gray background (80, 80, 80), dark gray text (40, 40, 40)
+                    loading_bg = (80, 80, 80)
+                    loading_text_color = (40, 40, 40)
+                    font_to_use = getattr(menu, 'title_font', None) or pygame.font.Font("assets/fonts/ari-w9500-bold.ttf", 38)
+                    for step in range(5):
+                        pygame.event.pump()
+                        for event in pygame.event.get():
+                            if event.type == pygame.QUIT:
+                                pygame.quit()
+                                sys.exit()
+                        screen.fill(loading_bg)
+                        dots = "." * (step % 4)
+                        label_text = tr(language, "menu.loading", default="loading").lower()
+                        msg = f"{label_text}{dots}"
+                        txt_surf = font_to_use.render(msg, True, loading_text_color)
+                        text_rect = txt_surf.get_rect(center=(current_w // 2, current_h // 2))
+                        screen.blit(txt_surf, text_rect)
+                        pygame.display.flip()
+                        pygame.time.wait(250)
+
                 sound_manager.stop_music()
+                if hasattr(sound_manager, 'set_music_state'):
+                    sound_manager.set_music_state('gameplay')
+                if hasattr(sound_manager, 'start_city_ambience'):
+                    sound_manager.start_city_ambience(CITY_AMBIENCE, gain=0.6)
+                game_music_track = None
                 player_world = (getattr(game_map, 'width_px', 12000), getattr(game_map, 'height_px', 12000))
+                other_players.clear()
+                remote_players.clear()
 
                 if multiplayer and network_client and network_client.server_player_data:
                     # ── MULTI: use server data ──
                     spd = network_client.server_player_data
                     multi_car = (spd.get('car_model', 'MICRO'), spd.get('car_color', 'White'))
-                    mission_system = MissionSystem(
-                        money=spd.get('money', 0),
-                        owned_cars=spd.get('owned_cars', [{"model": "MICRO", "color": "White"}]),
-                        completed_count=spd.get('completed_missions', 0),
-                        failed_count=spd.get('failed_missions', 0),
-                    )
-                    phone_ui = PhoneUI(current_w, current_h, mission_system)
                     player_obj = Player(multi_car, player_world)
                     player_obj.x = spd.get('last_x', 6000.0)
                     player_obj.y = spd.get('last_y', 6000.0)
                     player_obj.angle = spd.get('last_angle', 0.0)
                     player_obj.distance_traveled = spd.get('total_distance', 0.0)
-                    mp_username = getattr(menu, 'auth_username', '') or _cfg.get("multi", {}).get("username", USERNAME)
-                    game_ui = GameUI(screen, font, small_font, player_obj, game_map, other_players, current_w, current_h, mp_username, name_font, mission_system=mission_system, phone_ui=phone_ui)
+
+                    mission_system = MissionSystem(
+                        money=spd.get('money', 0),
+                        owned_cars=spd.get('owned_cars', [{"model": "MICRO", "color": "White"}]),
+                        completed_count=spd.get('completed_missions', 0),
+                        failed_count=spd.get('failed_missions', 0),
+                        current_car=multi_car,
+                        reputation=spd.get('reputation', 0),
+                        unlock_state=spd.get('unlock_state', {}),
+                        mission_stats=spd.get('mission_stats', {}),
+                        language=language,
+                    )
+                    mission_system.refresh_available_missions_for_vehicle(player_obj.car)
+                    if network_client.server_missions:
+                        mission_system.load_server_missions(network_client.server_missions, equipped_car=player_obj.car)
+
+                    def _mission_event_sender(event_type, payload, equipped_car):
+                        if network_client:
+                            network_client.send_mission_event(event_type, payload, equipped_car=equipped_car)
+
+                    phone_ui = PhoneUI(
+                        current_w,
+                        current_h,
+                        mission_system,
+                        mission_event_sender=_mission_event_sender,
+                        sound_event_sender=sound_manager.play_event,
+                        language=language,
+                        multiplayer=True,
+                        network_client=network_client,
+                    )
+                    mp_username = getattr(menu, 'auth_username', '') or getattr(menu, 'username', '') or USERNAME
+                    game_ui = GameUI(
+                        screen,
+                        font,
+                        small_font,
+                        player_obj,
+                        game_map,
+                        other_players,
+                        current_w,
+                        current_h,
+                        mp_username,
+                        name_font,
+                        mission_system=mission_system,
+                        phone_ui=phone_ui,
+                        language=language,
+                    )
                 else:
                     # ── SOLO: use local solo_save ──
                     solo = _solo
-                    mission_system = MissionSystem(
-                        money=solo.get("money", 0),
-                        owned_cars=solo.get("owned_cars", [{"model": "MICRO", "color": "White"}]),
-                        completed_count=solo.get("completed_missions", 0),
-                        failed_count=solo.get("failed_missions", 0),
-                    )
-                    phone_ui = PhoneUI(current_w, current_h, mission_system)
                     solo_car = (solo.get("car_model", "MICRO"), solo.get("car_color", "White"))
                     player_obj = Player(solo_car, player_world)
                     player_obj.x = solo.get("x", 6000.0)
                     player_obj.y = solo.get("y", 6000.0)
                     player_obj.angle = solo.get("angle", 0.0)
                     player_obj.distance_traveled = solo.get("total_distance", 0.0)
-                    game_ui = GameUI(screen, font, small_font, player_obj, game_map, other_players, current_w, current_h, USERNAME, name_font, mission_system=mission_system, phone_ui=phone_ui)
+
+                    mission_system = MissionSystem(
+                        money=solo.get("money", 0),
+                        owned_cars=solo.get("owned_cars", [{"model": "MICRO", "color": "White"}]),
+                        completed_count=solo.get("completed_missions", 0),
+                        failed_count=solo.get("failed_missions", 0),
+                        current_car=solo_car,
+                        reputation=solo.get("reputation", 0),
+                        unlock_state=solo.get("unlock_state", {}),
+                        mission_stats=solo.get("mission_stats", {}),
+                        language=language,
+                    )
+                    mission_system.refresh_available_missions_for_vehicle(player_obj.car)
+                    phone_ui = PhoneUI(
+                        current_w,
+                        current_h,
+                        mission_system,
+                        sound_event_sender=sound_manager.play_event,
+                        language=language,
+                        multiplayer=False,
+                        network_client=None,
+                    )
+                    solo_username = getattr(menu, 'username', USERNAME) or USERNAME
+                    if solo_username != _solo.get("username"):
+                        _solo["username"] = solo_username
+                        _save_json(SOLO_SAVE_PATH, _solo)
+                    game_ui = GameUI(
+                        screen,
+                        font,
+                        small_font,
+                        player_obj,
+                        game_map,
+                        other_players,
+                        current_w,
+                        current_h,
+                        solo_username,
+                        name_font,
+                        mission_system=mission_system,
+                        phone_ui=phone_ui,
+                        language=language,
+                    )
+
+                # IA locale: trafic en solo, braqueurs en solo/multi.
+                ai_manager = AIManager()
+                ai_tick_accumulator = 0.0
+                ai_world_cache = {}
+                drift_sound_active = False
+                handbrake_sound_latch = False
+                last_collision_count = int(getattr(player_obj, 'collision_count', 0) or 0)
+                collision_sound_cooldown = 0.0
+                robber_target_count = robber_difficulty * (2 if multiplayer else 1)
+                robbery_pressure = 0.0
+                robbery_close_count = 0
+                if not multiplayer:
+                    ai_manager.configure_performance(
+                        active_update_radius=1300.0,
+                        obstacle_neighbor_radius=0.0,
+                        use_dynamic_obstacles=False,
+                    )
+                    ai_manager.configure_dynamic_traffic(
+                        enabled=True,
+                        target_count=8,
+                        spawn_min_distance=520.0,
+                        spawn_radius=1500.0,
+                        despawn_radius=2600.0,
+                        center_bias=0.62,
+                        rebalance_interval=0.38,
+                        spawn_batch=1,
+                        edge_despawn_margin=48.0,
+                    )
+                    player_center = (
+                        player_obj.x + player_obj.size * 0.5,
+                        player_obj.y + player_obj.size * 0.5,
+                    )
+                    ai_manager.spawn_traffic(game_map, count=6, focus_points=[player_center])
+                else:
+                    ai_manager.configure_performance(
+                        active_update_radius=1200.0,
+                        obstacle_neighbor_radius=0.0,
+                        use_dynamic_obstacles=False,
+                    )
+                    ai_manager.configure_dynamic_traffic(
+                        enabled=False,
+                        target_count=0,
+                        spawn_batch=1,
+                        rebalance_interval=1.0,
+                    )
 
             if game_ui:
                 game_ui.handle_events(events)  # Gestion des événements de jeu
@@ -357,6 +629,7 @@ def main():
                             if mission_system and game_ui:
                                 if multiplayer and network_client:
                                     # ── MULTI: save progress to server ──
+                                    vehicle_profile = game_ui.player.get_vehicle_profile() if hasattr(game_ui.player, 'get_vehicle_profile') else {}
                                     progress = {
                                         'money': mission_system.money,
                                         'owned_cars': mission_system.owned_cars,
@@ -364,6 +637,16 @@ def main():
                                         'car_color': game_ui.player.car[1],
                                         'completed_missions': mission_system.completed_count,
                                         'failed_missions': mission_system.failed_count,
+                                        'total_distance': game_ui.player.distance_traveled,
+                                        'reputation': getattr(mission_system, 'reputation', 0),
+                                        'unlock_state': mission_system.get_unlock_state() if hasattr(mission_system, 'get_unlock_state') else {},
+                                        'mission_stats': dict(getattr(mission_system, 'mission_stats', {})),
+                                        'last_vehicle_class': vehicle_profile.get('vehicle_class', 'compact'),
+                                        'audio_settings': {
+                                            'music_state': getattr(sound_manager, 'current_music_state', 'menu'),
+                                            'music_volume': _cfg.get('music_volume', 0.25),
+                                            'effects_volume': _cfg.get('effects_volume', 0.75),
+                                        },
                                     }
                                     network_client.send_save_progress(progress)
                                 else:
@@ -372,6 +655,14 @@ def main():
                                     _solo["owned_cars"] = mission_system.owned_cars
                                     _solo["completed_missions"] = mission_system.completed_count
                                     _solo["failed_missions"] = mission_system.failed_count
+                                    _solo["reputation"] = getattr(mission_system, "reputation", 0)
+                                    _solo["unlock_state"] = mission_system.get_unlock_state() if hasattr(mission_system, "get_unlock_state") else {}
+                                    _solo["mission_stats"] = dict(getattr(mission_system, "mission_stats", {}))
+                                    _solo["audio_settings"] = {
+                                        "music_state": getattr(sound_manager, "current_music_state", "menu"),
+                                        "music_volume": _cfg.get("music_volume", 0.25),
+                                        "effects_volume": _cfg.get("effects_volume", 0.75),
+                                    }
                                     if game_ui.player:
                                         _solo["car_model"] = game_ui.player.car[0]
                                         _solo["car_color"] = game_ui.player.car[1]
@@ -379,22 +670,45 @@ def main():
                                         _solo["x"] = game_ui.player.x
                                         _solo["y"] = game_ui.player.y
                                         _solo["angle"] = game_ui.player.angle
+                                        profile = game_ui.player.get_vehicle_profile() if hasattr(game_ui.player, "get_vehicle_profile") else {}
+                                        _solo["last_vehicle_class"] = profile.get("vehicle_class", "compact")
                                     _save_json(SOLO_SAVE_PATH, _solo)
                             state = MENU
+                            menu.language = language
+                            current_menu_car = game_ui.player.car if (game_ui and getattr(game_ui, 'player', None)) else (_solo.get('car_model', 'MICRO'), _solo.get('car_color', 'White'))
+                            menu.refresh_vehicle(current_menu_car)
                             game_ui = None
                             mission_system = None
                             phone_ui = None
+                            ai_manager = None
+                            ai_tick_accumulator = 0.0
+                            ai_world_cache = {}
+                            robbery_pressure = 0.0
+                            robbery_close_count = 0
                             multiplayer = False
                             other_players.clear()
+                            remote_players.clear()
                             if network_client:
                                 network_client.send_disconnect('esc_menu')
                                 network_client.close()
                                 network_client = None
-                            sound_manager.play_music(MENU_MUSIC, volume=0.5)
+                            if hasattr(sound_manager, 'stop_vehicle_engine'):
+                                sound_manager.stop_vehicle_engine()
+                            if hasattr(sound_manager, 'stop_city_ambience'):
+                                sound_manager.stop_city_ambience()
+                            if MENU_MUSIC:
+                                sound_manager.play_music(MENU_MUSIC, volume=1.0)
+                            else:
+                                sound_manager.stop_music()
+                            if hasattr(sound_manager, 'set_music_state'):
+                                sound_manager.set_music_state('menu')
+                            game_music_track = MENU_MUSIC
                             break
                     elif event.type == pygame.KEYDOWN and event.key == pygame.K_UP:
                         if phone_ui and not phone_ui.visible:
                             phone_ui.toggle()  # Only open, not close
+                            if hasattr(sound_manager, 'play_event'):
+                                sound_manager.play_event('ui_open')
                     elif event.type == pygame.KEYDOWN and event.key == pygame.K_c:
                         game_map.show_collisions = not game_map.show_collisions
 
@@ -406,11 +720,113 @@ def main():
                     # Mise à jour animation téléphone
                     if phone_ui:
                         phone_ui.update(dt)
-                    # Construction des rectangles de collision pour les autres joueurs
-                    other_rects = []
+
+                    # Rectangles des joueurs distants (réseau) pour l'évitement IA
+                    remote_rects = []
                     hitbox_scale = getattr(game_ui.player, 'hitbox_scale', 1.0)
                     hit_size = max(2, int(game_ui.player.size * hitbox_scale))
                     hit_offset = (game_ui.player.size - hit_size) / 2
+                    for player_data in remote_players.values():
+                        if isinstance(player_data, dict):
+                            ox, oy = player_data.get('x', 0), player_data.get('y', 0)
+                        else:
+                            ox, oy = player_data
+                        remote_rects.append(pygame.Rect(int(ox + hit_offset), int(oy + hit_offset), hit_size, hit_size))
+
+                    # Mise à jour IA puis fusion dans la vue de rendu
+                    ai_render_players = {}
+                    risky_mission_active = bool(
+                        mission_system
+                        and mission_system.active_mission
+                        and str(getattr(mission_system.active_mission, 'risk_level', 'chill')).lower() == 'risky'
+                    )
+
+                    if ai_manager:
+                        if risky_mission_active:
+                            player_center = (
+                                game_ui.player.x + game_ui.player.size * 0.5,
+                                game_ui.player.y + game_ui.player.size * 0.5,
+                            )
+                            ai_manager.ensure_robbers(
+                                game_map,
+                                target_count=robber_target_count,
+                                focus_points=[player_center],
+                                enabled=True,
+                            )
+                        else:
+                            ai_manager.ensure_robbers(game_map, target_count=0, enabled=False)
+
+                        ai_tick_accumulator += dt
+                        update_steps = 0
+                        while ai_tick_accumulator >= ai_tick_interval and update_steps < 3:
+                            ai_world_cache = ai_manager.update_all(
+                                ai_tick_interval,
+                                game_map,
+                                player=game_ui.player,
+                                extra_obstacles=remote_rects,
+                            )
+                            ai_tick_accumulator -= ai_tick_interval
+                            update_steps += 1
+
+                        if not ai_world_cache:
+                            ai_world_cache = ai_manager.get_world_entities()
+
+                        ai_render_players = AIManager.entities_to_other_players(ai_world_cache, prefix="AI")
+
+                    robber_entities = []
+                    if isinstance(ai_world_cache, dict):
+                        robber_entities = [
+                            payload
+                            for payload in ai_world_cache.values()
+                            if isinstance(payload, dict) and str(payload.get('ai_kind', '')).lower() == 'robber'
+                        ]
+
+                    if risky_mission_active and mission_system and mission_system.active_mission:
+                        player_cx = game_ui.player.x + game_ui.player.size * 0.5
+                        player_cy = game_ui.player.y + game_ui.player.size * 0.5
+                        close_count = 0
+                        for robber in robber_entities:
+                            rcx = float(robber.get('x', 0.0) or 0.0) + game_ui.player.size * 0.5
+                            rcy = float(robber.get('y', 0.0) or 0.0) + game_ui.player.size * 0.5
+                            if ((rcx - player_cx) ** 2 + (rcy - player_cy) ** 2) <= (ROBBER_DANGER_RADIUS ** 2):
+                                close_count += 1
+
+                        robbery_close_count = close_count
+                        if close_count > 0:
+                            robbery_pressure = min(1.0, robbery_pressure + dt * robbery_fill_rate * close_count)
+                        else:
+                            robbery_pressure = max(0.0, robbery_pressure - dt * 0.35)
+
+                        if robbery_pressure >= 1.0:
+                            telemetry = (
+                                game_ui.player.get_mission_telemetry_snapshot()
+                                if hasattr(game_ui.player, 'get_mission_telemetry_snapshot')
+                                else None
+                            )
+                            if mission_system.fail_active_mission(reason='robbed', player_stats=telemetry):
+                                robbery_pressure = 0.0
+                                robbery_close_count = 0
+                                if ai_manager:
+                                    ai_manager.ensure_robbers(game_map, target_count=0, enabled=False)
+                    else:
+                        robbery_pressure = max(0.0, robbery_pressure - dt * 0.45)
+                        robbery_close_count = 0
+
+                    if hasattr(game_ui, 'set_robbery_status'):
+                        game_ui.set_robbery_status(
+                            active=risky_mission_active,
+                            pressure=robbery_pressure,
+                            robber_count=len(robber_entities),
+                            close_count=robbery_close_count,
+                        )
+
+                    combined_players = dict(remote_players)
+                    combined_players.update(ai_render_players)
+                    other_players.clear()
+                    other_players.update(combined_players)
+
+                    # Construction des rectangles de collision (joueurs distants + IA)
+                    other_rects = []
                     for player_data in other_players.values():
                         if isinstance(player_data, dict):
                             ox, oy = player_data.get('x', 0), player_data.get('y', 0)
@@ -421,35 +837,180 @@ def main():
                     # Mise à jour de l'état du jeu (mouvement, collisions, etc.)
                     game_ui.update(pygame.key.get_pressed(), dt, other_rects)
 
+                    # Déclencher les SFX véhicule à partir de la télémétrie joueur.
+                    if collision_sound_cooldown > 0.0:
+                        collision_sound_cooldown = max(0.0, collision_sound_cooldown - dt)
+
+                    player = game_ui.player
+                    speed_kmh = float(getattr(player, 'speed_kmh', 0.0) or 0.0)
+                    lateral_speed = float(getattr(player, 'lateral_speed', 0.0) or 0.0)
+                    drift_angle = abs(float(getattr(player, 'drift_angle', 0.0) or 0.0))
+                    handbrake_now = bool(getattr(player, 'handbrake', False))
+
+                    # Make drift audio easier to trigger while preserving hysteresis.
+                    drift_start_threshold = 82.0
+                    drift_hold_threshold = 62.0
+                    lateral_trigger = lateral_speed >= (drift_hold_threshold if drift_sound_active else drift_start_threshold)
+                    handbrake_trigger = handbrake_now and speed_kmh >= 30.0 and drift_angle >= 6.0
+                    is_drifting_now = lateral_trigger or handbrake_trigger
+
+                    if is_drifting_now and not drift_sound_active and hasattr(sound_manager, 'play_drift_start'):
+                        sound_manager.play_drift_start()
+                    elif not is_drifting_now and drift_sound_active and hasattr(sound_manager, 'play_drift_stop'):
+                        sound_manager.play_drift_stop()
+                    drift_sound_active = is_drifting_now
+
+                    if handbrake_now and not handbrake_sound_latch and speed_kmh >= 20.0 and hasattr(sound_manager, 'play_brake'):
+                        sound_manager.play_brake()
+                    handbrake_sound_latch = handbrake_now
+
+                    current_collision_count = int(getattr(player, 'collision_count', 0) or 0)
+                    if current_collision_count < last_collision_count:
+                        # Le compteur peut être réinitialisé après une mission.
+                        last_collision_count = current_collision_count
+
+                    new_collisions = max(0, current_collision_count - last_collision_count)
+                    if new_collisions > 0 and collision_sound_cooldown <= 0.0 and hasattr(sound_manager, 'play_collision'):
+                        impact_intensity = min(1.0, max(0.25, speed_kmh / 110.0))
+                        sound_manager.play_collision(impact_intensity)
+                        collision_sound_cooldown = 0.14
+                    last_collision_count = current_collision_count
+
                     # Mise à jour du système de missions
                     if mission_system and game_ui:
                         player_cx = game_ui.player.x + game_ui.player.size / 2
                         player_cy = game_ui.player.y + game_ui.player.size / 2
-                        mission_system.update(player_cx, player_cy, dt)
+                        telemetry = (
+                            game_ui.player.get_mission_telemetry_snapshot()
+                            if hasattr(game_ui.player, 'get_mission_telemetry_snapshot')
+                            else None
+                        )
+                        mission_system.update(player_cx, player_cy, dt, player_stats=telemetry)
+
+                        if hasattr(mission_system, 'get_and_clear_mission_events'):
+                            for event in mission_system.get_and_clear_mission_events():
+                                event_name = str(event.get('type', ''))
+                                if hasattr(sound_manager, 'play_event') and event_name:
+                                    sound_manager.play_event(event_name)
+
+                        # Résultat mission one-shot: popup local + synchro réseau (multi).
+                        mission_result = mission_system.consume_last_result() if hasattr(mission_system, 'consume_last_result') else None
+                        if mission_result:
+                            if hasattr(game_ui, 'push_mission_result'):
+                                game_ui.push_mission_result(mission_result)
+
+                            if hasattr(game_ui.player, 'reset_mission_telemetry'):
+                                game_ui.player.reset_mission_telemetry()
+
+                            if hasattr(sound_manager, 'play_event'):
+                                sound_manager.play_event('mission_complete' if mission_result.get('success', False) else 'mission_fail')
+
+                            if multiplayer and network_client:
+                                mission_payload = mission_result.get('mission', {}) if isinstance(mission_result.get('mission', {}), dict) else {}
+                                mission_id = mission_payload.get('id')
+                                if mission_id is not None:
+                                    if mission_result.get('success', False):
+                                        reward_value = int(mission_result.get('money_delta', mission_payload.get('reward', 0)) or 0)
+                                        rep_delta = int(mission_result.get('reputation_delta', 0) or 0)
+                                        network_client.send_mission_event(
+                                            'mission_complete',
+                                            {'id': mission_id, 'reward': reward_value, 'reputation_delta': rep_delta},
+                                            equipped_car=game_ui.player.car,
+                                        )
+                                    else:
+                                        network_client.send_mission_event(
+                                            'mission_fail',
+                                            {
+                                                'id': mission_id,
+                                                'reason': str(mission_result.get('reason', 'failed')),
+                                            },
+                                            equipped_car=game_ui.player.car,
+                                        )
+
+                        # Multi: synchroniser la liste serveur et traiter les refus d'acceptation.
+                        if multiplayer and network_client:
+                            if mission_system.active_mission is None and network_client.server_missions:
+                                mission_system.load_server_missions(network_client.server_missions, equipped_car=game_ui.player.car)
+
+                            if getattr(network_client, 'mission_denials', None):
+                                for denial in network_client.mission_denials:
+                                    denied_id = denial.get('mission_id')
+                                    reason = denial.get('reason', 'incompatible')
+                                    if denied_id is not None:
+                                        mission_system.handle_server_mission_denied(denied_id, reason=reason)
+                                        if hasattr(sound_manager, 'play_event'):
+                                            sound_manager.play_event('mission_denied')
+                                network_client.mission_denials.clear()
+
+                    if game_ui and hasattr(sound_manager, 'update_vehicle_engine'):
+                        sound_manager.update_vehicle_engine(player=game_ui.player)
+                        if hasattr(sound_manager, 'update_other_engines'):
+                            sound_manager.update_other_engines(player=game_ui.player, other_players=other_players)
+                        desired_music = None
+                        if hasattr(sound_manager, 'set_music_state'):
+                            if mission_system and mission_system.active_mission:
+                                desired_music = MISSION_MUSIC
+                                state_name = 'high_intensity' if mission_system.active_mission.time_remaining <= 25 else 'mission'
+                            else:
+                                state_name = 'gameplay'
+                            sound_manager.set_music_state(state_name)
+                        if desired_music != game_music_track:
+                            if desired_music:
+                                sound_manager.play_music(desired_music, volume=1.0)
+                            else:
+                                sound_manager.stop_music()
+                            game_music_track = desired_music
 
                     # Gestion du réseau en mode multijoueur
                     if multiplayer and network_client:
                         _send_player_position(network_client, game_ui.player, USERNAME)  # Envoi position
-                        if _receive_player_positions(network_client, other_players, USERNAME):  # Réception positions
+                        if _receive_player_positions(network_client, remote_players, USERNAME):  # Réception positions
                             connection_errors = 0  # Réinitialiser le compteur d'erreurs
+
+                            # Rafraîchir immédiatement la vue de rendu après réception réseau
+                            combined_players = dict(remote_players)
+                            combined_players.update(ai_render_players)
+                            other_players.clear()
+                            other_players.update(combined_players)
                         else:
                             connection_errors += 1  # Incrémenter les erreurs
                             if connection_errors >= MAX_CONNECTION_ERRORS:
                                 # Trop d'erreurs consécutives - déconnexion automatique
                                 print("Trop d'erreurs de réception, retour au menu")
                                 state = MENU
+                                menu.language = language
+                                current_menu_car = game_ui.player.car if (game_ui and getattr(game_ui, 'player', None)) else (_solo.get('car_model', 'MICRO'), _solo.get('car_color', 'White'))
+                                menu.refresh_vehicle(current_menu_car)
                                 game_ui = None
                                 mission_system = None
                                 phone_ui = None
+                                ai_manager = None
+                                ai_tick_accumulator = 0.0
+                                ai_world_cache = {}
+                                robbery_pressure = 0.0
+                                robbery_close_count = 0
                                 multiplayer = False
                                 other_players.clear()
+                                remote_players.clear()
                                 if network_client:
                                     network_client.send_disconnect('net_error')
                                     network_client.close()
                                     network_client = None
                                 menu.show_error = True
-                                menu.error_message = "Déconnecté du serveur !"
-                                sound_manager.play_music(MENU_MUSIC, volume=1)
+                                menu.error_message = tr(language, "menu.disconnected")
+                                if hasattr(sound_manager, 'stop_vehicle_engine'):
+                                    sound_manager.stop_vehicle_engine()
+                                if hasattr(sound_manager, 'stop_city_ambience'):
+                                    sound_manager.stop_city_ambience()
+                                if MENU_MUSIC:
+                                    sound_manager.play_music(MENU_MUSIC, volume=1.0)
+                                else:
+                                    sound_manager.stop_music()
+                                if hasattr(sound_manager, 'set_music_state'):
+                                    sound_manager.set_music_state('menu')
+                                game_music_track = MENU_MUSIC
+                    if multiplayer and network_client and hasattr(game_ui, 'set_party_snapshot'):
+                        game_ui.set_party_snapshot(getattr(network_client, 'party_state', {}))
                     if game_ui:
                         game_ui.render()  # Rendu graphique du jeu
                         # Rendu du téléphone par-dessus (peek strip + slide-up)
@@ -462,6 +1023,10 @@ def main():
     if network_client:
         network_client.send_disconnect('shutdown')  # Informer le serveur de l'arrêt
         network_client.close()  # Fermer proprement la connexion
+    if hasattr(sound_manager, 'stop_vehicle_engine'):
+        sound_manager.stop_vehicle_engine()
+    if hasattr(sound_manager, 'stop_city_ambience'):
+        sound_manager.stop_city_ambience()
     pygame.quit()  # Quitter Pygame
     sys.exit()  # Terminer le programme
 

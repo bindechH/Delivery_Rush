@@ -1,8 +1,8 @@
 {
-  "username": "maleine 2",
-  "car_model": "COUPE",
-  "car_color": "Magenta",
-  "money": 2122121222169,
+  "username": "mohamedzeaezaezaeza",
+  "car_model": "SUPERCAR",
+  "car_color": "Red",
+  "money": 99985942,
   "owned_cars": [
     {
       "model": "MICRO",
@@ -35,12 +35,44 @@
     {
       "model": "BOX TRUCK",
       "color": "Black"
+    },
+    {
+      "model": "SUPERCAR",
+      "color": "Red"
+    },
+    {
+      "model": "MICRO",
+      "color": "Blue"
+    },
+    {
+      "model": "MICRO",
+      "color": "Brown"
     }
   ],
-  "completed_missions": 3,
-  "failed_missions": 0,
-  "total_distance": 219739.3965669616,
-  "x": 6000.0,
-  "y": 6000.0,
-  "angle": 0.0
+  "completed_missions": 7,
+  "failed_missions": 6,
+  "total_distance": 781218.6286961315,
+  "x": 4424.583087734635,
+  "y": 7846.756702095307,
+  "angle": -15663.476799461936,
+  "reputation": 0,
+  "unlock_state": {
+    "tier": "rookie",
+    "unlocked_types": [
+      "standard"
+    ],
+    "reputation": 0
+  },
+  "mission_stats": {
+    "current_streak": 0,
+    "best_streak": 2,
+    "bonus_earned": 0,
+    "penalty_taken": 2387
+  },
+  "last_vehicle_class": "super",
+  "audio_settings": {
+    "music_state": "gameplay",
+    "music_volume": 0.1,
+    "effects_volume": 0.1
+  }
 }

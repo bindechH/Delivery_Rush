@@ -6,6 +6,7 @@ Inclut le système de drift, frein à main, contrôles refondus et catalogue de 
 
 import math
 from pathlib import Path
+from typing import Any, Dict, List, Tuple
 import pygame
 
 # === CONSTANTES DU JOUEUR === (30px = 1 metre)
@@ -41,6 +42,7 @@ COLLISION_SPEED_LOSS = 0.5
 DRIFT_PARTICLE_THRESHOLD = 120.0
 MAX_DRIFT_TRAIL = 600
 DRIFT_TRAIL_FADE = 0.4
+DRIFT_TELEMETRY_THRESHOLD = 42.0
 
 # === CATALOGUE DE VÉHICULES ===
 VEHICLE_CATALOG = {
@@ -63,10 +65,123 @@ VEHICLE_CATALOG = {
     "MEDIUM TRUCK": {"price": 7000,  "max_speed": 700,  "accel": 330, "handling": 0.6,  "brake": 400, "grip": 6.0, "mass": 2.5,  "desc": "Poids lourd"},
 }
 
+VEHICLE_CLASS_BY_MODEL = {
+    "MICRO": "compact",
+    "HATCHBACK": "compact",
+    "CIVIC": "compact",
+    "SEDAN": "family",
+    "COUPE": "sport",
+    "WAGON": "family",
+    "MINIVAN": "family",
+    "SUV": "family",
+    "JEEP": "family",
+    "PICKUP": "utility",
+    "MUSCLECAR": "sport",
+    "SPORT": "sport",
+    "LUXURY": "family",
+    "SUPERCAR": "super",
+    "VAN": "utility",
+    "BOX TRUCK": "utility",
+    "MEDIUM TRUCK": "truck",
+}
+
+VEHICLE_CAPACITY_BY_CLASS = {
+    "compact": 70,
+    "family": 120,
+    "sport": 80,
+    "utility": 210,
+    "super": 65,
+    "truck": 320,
+}
+
+VEHICLE_TAGS_BY_CLASS = {
+    "compact": ["city"],
+    "family": ["comfort"],
+    "sport": ["express", "agile"],
+    "utility": ["cargo", "delivery"],
+    "super": ["express", "vip"],
+    "truck": ["cargo", "heavy"],
+}
+
+VEHICLE_TAGS_BY_MODEL = {
+    "SUV": ["offroad"],
+    "JEEP": ["offroad"],
+    "PICKUP": ["offroad", "cargo"],
+    "BOX TRUCK": ["heavy", "bulk"],
+    "MEDIUM TRUCK": ["heavy", "industrial"],
+    "SPORT": ["race"],
+    "SUPERCAR": ["race", "vip"],
+}
+
+for _model, _stats in VEHICLE_CATALOG.items():
+    _vclass = VEHICLE_CLASS_BY_MODEL.get(_model, "compact")
+    _stats.setdefault("vehicle_class", _vclass)
+    _stats.setdefault("cargo_capacity", VEHICLE_CAPACITY_BY_CLASS.get(_vclass, 100))
+    _tags = set(VEHICLE_TAGS_BY_CLASS.get(_vclass, []))
+    _tags.update(VEHICLE_TAGS_BY_MODEL.get(_model, []))
+    _stats.setdefault("special_tags", sorted(_tags))
+
 VEHICLE_COLORS = ["Black", "Blue", "Brown", "Green", "Magenta", "Red", "White", "Yellow"]
+
+# Asset packs missing in this workspace: block these specific model/color pairs.
+_BLOCKED_MODEL_COLORS = {
+    "PICKUP": {"BROWN"},
+    "BOX TRUCK": {"MAGENTA"},
+}
+
+
+def _normalize_model(model: Any) -> str:
+    return str(model or "MICRO").strip().upper()
+
+
+def _normalize_color(color: Any) -> str:
+    return str(color or "White").strip().capitalize()
+
+
+def is_vehicle_color_allowed(model: str, color: str) -> bool:
+    blocked = _BLOCKED_MODEL_COLORS.get(_normalize_model(model), set())
+    return _normalize_color(color).upper() not in blocked
+
+
+def get_available_vehicle_colors(model: str) -> List[str]:
+    colors = [c for c in VEHICLE_COLORS if is_vehicle_color_allowed(model, c)]
+    return colors if colors else ["White"]
+
+
+def sanitize_vehicle_color(model: str, color: str) -> str:
+    normalized = _normalize_color(color)
+    if normalized in VEHICLE_COLORS and is_vehicle_color_allowed(model, normalized):
+        return normalized
+
+    available = get_available_vehicle_colors(model)
+    if "White" in available:
+        return "White"
+    return available[0]
+
+
+def sanitize_car(car: Any) -> Tuple[str, str]:
+    model = car[0] if isinstance(car, (list, tuple)) and len(car) > 0 else "MICRO"
+    color = car[1] if isinstance(car, (list, tuple)) and len(car) > 1 else "White"
+    model = str(model or "MICRO")
+    return model, sanitize_vehicle_color(model, str(color or "White"))
+
+
+def build_vehicle_profile(car: Tuple[str, str]) -> Dict[str, Any]:
+    """Construit un profil gameplay de véhicule à partir du catalogue."""
+    model, color = sanitize_car(car)
+    stats = VEHICLE_CATALOG.get(model, VEHICLE_CATALOG.get("MICRO", {}))
+    return {
+        "model": model,
+        "color": color,
+        "vehicle_class": stats.get("vehicle_class", "compact"),
+        "max_speed": float(stats.get("max_speed", DEFAULT_MAX_SPEED)),
+        "cargo_capacity": float(stats.get("cargo_capacity", 70)),
+        "special_tags": list(stats.get("special_tags", [])),
+    }
 
 def resolve_car_frame_path(model: str, color: str, idx: int) -> str:
     """Résout un chemin d'image de frame pour une voiture en essayant plusieurs variantes de dossier."""
+    color = sanitize_vehicle_color(model, color)
     car_name = model.replace(' ', '').upper()
     base_candidates = [
         model,
@@ -90,9 +205,9 @@ class Player:
         self.angle = 0.0  # 0 deg direction est
         self.size = PLAYER_SIZE
         self.hitbox_scale = HITBOX_SCALE
-        self.car = car # (modèle, couleur)
+        self.car = sanitize_car(car) # (modèle, couleur)
         self.world_width, self.world_height = world_size # Taille du monde pour les limites
-        self.frames = self._load_frames(car)
+        self.frames = self._load_frames(self.car)
         self.reverse_wait = 0.0
         self.speed_px_s = 0.0
         self.speed_kmh = 0.0
@@ -102,7 +217,7 @@ class Player:
         self.drift_angle = 0.0
         self.lateral_speed = 0.0
         # Charger les stats du véhicule depuis le catalogue
-        stats = VEHICLE_CATALOG.get(car[0], {})
+        stats = VEHICLE_CATALOG.get(self.car[0], {})
         self.max_speed = stats.get('max_speed', DEFAULT_MAX_SPEED)
         self.rev_speed = min(400.0, self.max_speed * 0.3)
         self.accel = stats.get('accel', DEFAULT_ACCEL)
@@ -113,6 +228,12 @@ class Player:
         self.drag = DEFAULT_DRAG
         self.distance_traveled = 0.0  # pixels parcourus
         self.drift_trail = []  # [(world_x, world_y, life)]
+        self.collision_count = 0
+        self.offroad_time = 0.0
+        self.drift_time = 0.0
+        self.mission_time = 0.0
+        self._speed_samples = 0
+        self._speed_accumulator = 0.0
 
     def _load_frames(self, car):
         """Loaf les frames de la voiture en fonction du modèle et de la couleur."""
@@ -131,6 +252,7 @@ class Player:
         """Met à jour la physique avec drift, frein à main, collisions carte et véhicules."""
         if other_rects is None:
             other_rects = []
+        collided_this_frame = False
 
         # === ENTRÉES (ZQSD seulement) ===
         turn_dir = 0.0
@@ -148,6 +270,10 @@ class Player:
             center_x = self.x + self.size / 2
             center_y = self.y + self.size / 2
             self.on_road = game_map.is_road_at(center_x, center_y)
+
+        self.mission_time += dt
+        if not self.on_road:
+            self.offroad_time += dt
 
         # === VITESSE ET DIRECTION ACTUELLE ===
         speed = math.hypot(self.vx, self.vy)
@@ -232,6 +358,9 @@ class Player:
             self.lateral_speed = abs(lateral_vel)
             self.drift_angle = math.degrees(math.atan2(lateral_vel, max(1.0, abs(forward_vel))))
 
+            if self.lateral_speed >= DRIFT_TELEMETRY_THRESHOLD:
+                self.drift_time += dt
+
             self.vx = forward_vel * cos_a - lateral_vel * sin_a
             self.vy = forward_vel * sin_a + lateral_vel * cos_a
 
@@ -289,6 +418,9 @@ class Player:
         # Vitesse pour l'overlay
         self.speed_px_s = math.hypot(self.vx, self.vy)
         self.speed_kmh = self.speed_px_s * 0.12
+        if self.speed_kmh > 1.0:
+            self._speed_samples += 1
+            self._speed_accumulator += self.speed_kmh
 
         # Accumulation distance (30px = 1m)
         displacement = self.speed_px_s * dt
@@ -306,6 +438,7 @@ class Player:
                 overlap = hitbox.clip(tile_rect)
                 if overlap.width <= 0 or overlap.height <= 0:
                     continue
+                collided_this_frame = True
                 if overlap.width < overlap.height:
                     if hitbox.centerx < tile_rect.centerx:
                         self.x -= overlap.width
@@ -351,6 +484,7 @@ class Player:
             if other.width < 2 or other.height < 2:
                 continue
             if rect.colliderect(other):
+                collided_this_frame = True
                 overlap = rect.clip(other)
                 if overlap.width < overlap.height:
                     if self.vx > 0:
@@ -365,6 +499,9 @@ class Player:
                         self.y += overlap.height + 1
                     self.vy *= -0.25
                 rect = self.get_hitbox_rect()
+
+        if collided_this_frame:
+            self.collision_count += 1
 
 
     def render(self, screen, camera_x, camera_y, zoom=1.0):
@@ -393,9 +530,9 @@ class Player:
 
     def change_car(self, new_car):
         """Change le véhicule du joueur (recharge les frames et stats)."""
-        self.car = new_car
-        self.frames = self._load_frames(new_car)
-        stats = VEHICLE_CATALOG.get(new_car[0], {})
+        self.car = sanitize_car(new_car)
+        self.frames = self._load_frames(self.car)
+        stats = VEHICLE_CATALOG.get(self.car[0], {})
         self.max_speed = stats.get('max_speed', DEFAULT_MAX_SPEED)
         self.rev_speed = min(400.0, self.max_speed * 0.3)
         self.accel = stats.get('accel', DEFAULT_ACCEL)
@@ -404,3 +541,29 @@ class Player:
         self.turn_speed = DEFAULT_TURN_SPEED * stats.get('handling', 1.0)
         self.grip = stats.get('grip', DEFAULT_GRIP)
         self.drag = DEFAULT_DRAG
+
+    def get_vehicle_profile(self):
+        """Retourne le profil gameplay du véhicule actuellement équipé."""
+        return build_vehicle_profile(self.car)
+
+    def reset_mission_telemetry(self):
+        """Réinitialise les compteurs gameplay utilisés pour le score de mission."""
+        self.collision_count = 0
+        self.offroad_time = 0.0
+        self.drift_time = 0.0
+        self.mission_time = 0.0
+        self._speed_samples = 0
+        self._speed_accumulator = 0.0
+
+    def get_mission_telemetry_snapshot(self):
+        """Retourne un snapshot de télémétrie pour l'évaluation de mission."""
+        avg_speed = 0.0
+        if self._speed_samples > 0:
+            avg_speed = self._speed_accumulator / float(self._speed_samples)
+        return {
+            "collision_count": int(self.collision_count),
+            "offroad_time": float(self.offroad_time),
+            "drift_time": float(self.drift_time),
+            "avg_speed_kmh": float(avg_speed),
+            "mission_time": float(self.mission_time),
+        }
