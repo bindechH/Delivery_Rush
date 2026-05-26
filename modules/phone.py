@@ -7,7 +7,17 @@ Animation slide-up, achat de véhicules, carte complète.
 import math
 import pygame
 from .translate import normalize_language, tr
-from .missions import MISSION_LOCATIONS
+from .missions import (
+    MISSION_LOCATIONS,
+    CARGO_POOL,
+    REWARD_STANDARD,
+    REWARD_EXPRESS,
+    REWARD_CHAIN,
+    TIME_STANDARD,
+    TIME_EXPRESS,
+    TIME_CHAIN,
+    RISKY_TYPE_BASE_CHANCE,
+)
 from .player import (
     VEHICLE_CATALOG,
     get_available_vehicle_colors,
@@ -57,7 +67,7 @@ BASE_APPS = [
     {"id": "missions", "name": "phone.deliveries", "icon": "\u25a3", "color": (70, 180, 70)},
     {"id": "gps",      "name": "phone.gps",        "icon": "\u25c9", "color": (70, 130, 230)},
     {"id": "shop",     "name": "phone.shop",       "icon": "\u2605", "color": (230, 180, 50)},
-    {"id": "garage",   "name": "phone.garage",     "icon": "\u25a0", "color": (180, 100, 50)},
+    {"id": "wiki",     "name": "phone.wiki",       "icon": "\u2139", "color": (90, 160, 220)},
     {"id": "stats",    "name": "phone.stats",      "icon": "\u25b2", "color": (180, 80, 230)},
 ]
 
@@ -88,17 +98,23 @@ class PhoneUI:
         self.anim_speed = 5.0
 
         # Navigation
-        self.current_screen = "home"  # home, missions, gps, shop, garage, stats
+        self.current_screen = "home"  # home, missions, gps, shop, wiki, stats
         self.scroll_offset = 0
         self.hovered_mission = -1
         self.shop_scroll = 0
         self.shop_selected_colors = {}  # model -> color index
         self.garage_scroll = 0
+        self.guide_scroll = 0
+        self._guide_scroll_max = 0
 
         # Keyboard navigation
         self.kb_focus = 0  # focused item index on current screen
         self.home_focus = 0  # which app icon is focused on home
         self._last_net_sync = 0.0
+        self.gps_anim_progress = 0.0
+        self.gps_anim_speed = 10.0
+        self.gps_legend_page = 0
+        self.gps_hover_local = None
 
         # Polices
         self.font_title = pygame.font.Font("assets/fonts/ari-w9500-bold.ttf", 17)
@@ -119,6 +135,11 @@ class PhoneUI:
             self._phone_frame = pygame.transform.smoothscale(self._phone_frame_raw, (PHONE_WIDTH, PHONE_HEIGHT))
         except Exception:
             self._phone_frame = None
+
+        try:
+            self._gps_minimap_bg = pygame.image.load("assets/images/HUD/minimap.png").convert_alpha()
+        except Exception:
+            self._gps_minimap_bg = None
 
         # Phone position: bottom-right corner, slide up from bottom
         self.phone_x = screen_width - PHONE_WIDTH - 15
@@ -220,6 +241,9 @@ class PhoneUI:
         self.scroll_offset = 0
         self.shop_scroll = 0
         self.garage_scroll = 0
+        self.guide_scroll = 0
+        self._guide_scroll_max = 0
+        self.gps_hover_local = None
         self.hovered_mission = -1
         self.kb_focus = 0
         self.home_focus = 0
@@ -243,6 +267,12 @@ class PhoneUI:
                     self.network_client.request_party_state()
                 self._last_net_sync = now_s
 
+        gps_target = 1.0 if (self.visible and self.current_screen == "gps") else 0.0
+        if self.gps_anim_progress < gps_target:
+            self.gps_anim_progress = min(gps_target, self.gps_anim_progress + self.gps_anim_speed * dt)
+        elif self.gps_anim_progress > gps_target:
+            self.gps_anim_progress = max(gps_target, self.gps_anim_progress - self.gps_anim_speed * dt)
+
     def _phone_y(self):
         """Position Y du téléphone basée sur l'animation."""
         t = self.anim_progress
@@ -252,6 +282,78 @@ class PhoneUI:
 
     def _phone_rect(self):
         return pygame.Rect(self.phone_x, self._phone_y(), PHONE_WIDTH, PHONE_HEIGHT)
+
+    def _gps_transform_state(self):
+        t = max(0.0, min(1.0, float(self.gps_anim_progress)))
+        t_ease = 1.0 - (1.0 - t) ** 3
+
+        src_screen = pygame.Rect(
+            self.phone_x + PHONE_SCREEN_X,
+            self._phone_y() + PHONE_SCREEN_Y,
+            PHONE_SCREEN_W,
+            PHONE_SCREEN_H,
+        )
+
+        margin_x = max(22, self.screen_width // 26)
+        margin_y = max(20, self.screen_height // 16)
+        target_scale = min(
+            (self.screen_width - margin_x * 2) / float(PHONE_HEIGHT),
+            (self.screen_height - margin_y * 2) / float(PHONE_WIDTH),
+        )
+        target_scale = max(1.0, target_scale)
+        scale = 1.0 + (target_scale - 1.0) * t_ease
+
+        # Rotate phone to the left (counter-clockwise) into landscape.
+        angle = 90.0 * t_ease
+
+        src_cx = self.phone_x + PHONE_WIDTH / 2.0
+        src_cy = self._phone_y() + PHONE_HEIGHT / 2.0
+        dst_cx = self.screen_width / 2.0
+        dst_cy = self.screen_height / 2.0
+        cx = src_cx + (dst_cx - src_cx) * t_ease
+        cy = src_cy + (dst_cy - src_cy) * t_ease
+
+        off_x = (PHONE_SCREEN_X + PHONE_SCREEN_W / 2.0) - (PHONE_WIDTH / 2.0)
+        off_y = (PHONE_SCREEN_Y + PHONE_SCREEN_H / 2.0) - (PHONE_HEIGHT / 2.0)
+        dst_screen_cx = dst_cx - off_y * target_scale
+        dst_screen_cy = dst_cy + off_x * target_scale
+        dst_screen_w = PHONE_SCREEN_H * target_scale
+        dst_screen_h = PHONE_SCREEN_W * target_scale
+        dst_screen = pygame.Rect(
+            int(dst_screen_cx - dst_screen_w / 2.0),
+            int(dst_screen_cy - dst_screen_h / 2.0),
+            int(dst_screen_w),
+            int(dst_screen_h),
+        )
+
+        gps_screen_rect = pygame.Rect(
+            int(src_screen.x + (dst_screen.x - src_screen.x) * t_ease),
+            int(src_screen.y + (dst_screen.y - src_screen.y) * t_ease),
+            int(src_screen.width + (dst_screen.width - src_screen.width) * t_ease),
+            int(src_screen.height + (dst_screen.height - src_screen.height) * t_ease),
+        )
+        gps_screen_rect.width = max(120, gps_screen_rect.width)
+        gps_screen_rect.height = max(90, gps_screen_rect.height)
+
+        return {
+            "t": t,
+            "t_ease": t_ease,
+            "angle": angle,
+            "scale": scale,
+            "center": (int(cx), int(cy)),
+            "gps_screen_rect": gps_screen_rect,
+        }
+
+    def _gps_landscape_rect(self):
+        return self._gps_transform_state()["gps_screen_rect"]
+
+    def _gps_legend_page_size(self, legend_h):
+        row_h = max(12, self.font_small.get_height() + 2)
+        hint_h = self.font_small.get_height()
+        hint_y = legend_h - hint_h - 6
+        list_top = 24
+        list_bottom = max(list_top, hint_y - 6)
+        return max(1, (list_bottom - list_top) // row_h)
 
     def _equipped_car(self):
         if self.player and hasattr(self.player, "car"):
@@ -281,6 +383,32 @@ class PhoneUI:
             self.mission_event_sender("mission_accept", {"id": mission.id}, self._equipped_car())
         except Exception:
             pass
+
+    def _can_start_party_mission(self):
+        """En multi, seul le leader peut démarrer une mission partagée de party."""
+        if not self.multiplayer or not self.network_client:
+            return True
+
+        state = dict(getattr(self.network_client, 'party_state', {}) or {})
+        my_party = state.get('my_party')
+        if not isinstance(my_party, dict):
+            return True
+
+        members_raw = my_party.get('members', []) if isinstance(my_party.get('members'), list) else []
+        members = [str(m) for m in members_raw if str(m)]
+        if len(members) <= 1:
+            return True
+
+        leader = str(my_party.get('leader', '') or '').strip()
+        me = str(getattr(self.network_client, 'username', '') or '').strip()
+        if leader and me and leader != me:
+            msg = self._t("phone.party_leader_start_only")
+            if hasattr(self.mission_system, "set_external_notification"):
+                self.mission_system.set_external_notification(msg)
+            self._emit_sound_event("mission_denied")
+            return False
+
+        return True
 
     def _emit_sound_event(self, event_name):
         if not self.sound_event_sender:
@@ -341,8 +469,6 @@ class PhoneUI:
             return "phone.hint_heavy"
         if {"express", "race", "vip"} & tags:
             return "phone.hint_express"
-        if {"offroad"} & tags:
-            return "phone.hint_offroad"
         return "phone.hint_standard"
 
     def handle_events(self, events):
@@ -350,6 +476,7 @@ class PhoneUI:
         if not self.visible or self.anim_progress < 0.8:
             return
         phone_rect = self._phone_rect()
+        gps_rect = self._gps_landscape_rect() if self.current_screen == "gps" else None
 
         for event in events:
             # Keyboard controls
@@ -362,6 +489,8 @@ class PhoneUI:
                         self.scroll_offset = 0
                         self.shop_scroll = 0
                         self.garage_scroll = 0
+                        self.guide_scroll = 0
+                        self.gps_hover_local = None
                         self.kb_focus = 0
                         self._emit_sound_event("ui_back")
                     continue
@@ -385,12 +514,18 @@ class PhoneUI:
 
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 mx, my = event.pos
-                if not phone_rect.collidepoint(mx, my):
-                    continue
-                lx = mx - phone_rect.x - PHONE_SCREEN_X
-                ly = my - phone_rect.y - PHONE_SCREEN_Y
-                if lx < 0 or ly < 0 or lx >= PHONE_SCREEN_W or ly >= PHONE_SCREEN_H:
-                    continue
+                if self.current_screen == "gps" and gps_rect is not None:
+                    if not gps_rect.collidepoint(mx, my):
+                        continue
+                    lx = (mx - gps_rect.x) * (PHONE_SCREEN_H / max(1.0, float(gps_rect.width)))
+                    ly = (my - gps_rect.y) * (PHONE_SCREEN_W / max(1.0, float(gps_rect.height)))
+                else:
+                    if not phone_rect.collidepoint(mx, my):
+                        continue
+                    lx = mx - phone_rect.x - PHONE_SCREEN_X
+                    ly = my - phone_rect.y - PHONE_SCREEN_Y
+                    if lx < 0 or ly < 0 or lx >= PHONE_SCREEN_W or ly >= PHONE_SCREEN_H:
+                        continue
 
                 if self.current_screen == "home":
                     self._handle_home_click(lx, ly)
@@ -400,23 +535,46 @@ class PhoneUI:
                     self._handle_shop_click(lx, ly)
                 elif self.current_screen == "garage":
                     self._handle_garage_click(lx, ly)
-                elif self.current_screen in ("stats", "gps", "leaderboard"):
+                elif self.current_screen in ("stats", "gps", "leaderboard", "wiki"):
                     self._handle_back_click(lx, ly)
                 elif self.current_screen == "party":
                     self._handle_party_click(lx, ly)
 
             elif event.type == pygame.MOUSEWHEEL:
-                if phone_rect.collidepoint(*pygame.mouse.get_pos()):
+                pointer = pygame.mouse.get_pos()
+                active_rect = gps_rect if (self.current_screen == "gps" and gps_rect is not None) else phone_rect
+                if active_rect.collidepoint(*pointer):
                     if self.current_screen == "missions":
                         self.scroll_offset = max(0, self.scroll_offset - event.y * 30)
                     elif self.current_screen == "shop":
                         self.shop_scroll = max(0, self.shop_scroll - event.y * 35)
                     elif self.current_screen == "garage":
                         self.garage_scroll = max(0, self.garage_scroll - event.y * 35)
+                    elif self.current_screen == "gps":
+                        pad = 10
+                        map_area_y = 32
+                        legend_row_h = max(16, self.font_small.get_height() + 4)
+                        content_h = PHONE_SCREEN_W if self.gps_anim_progress >= 0.5 else PHONE_SCREEN_H
+                        legend_h = max(150, content_h - map_area_y - pad - legend_row_h)
+                        page_size = self._gps_legend_page_size(legend_h)
+                        total = max(1, len(MISSION_LOCATIONS))
+                        pages = max(1, math.ceil(total / page_size))
+                        self.gps_legend_page = max(0, min(pages - 1, self.gps_legend_page - event.y))
+                    elif self.current_screen == "wiki":
+                        self.guide_scroll = max(0, min(self._guide_scroll_max, self.guide_scroll - event.y * 26))
 
             elif event.type == pygame.MOUSEMOTION:
                 if self.current_screen == "missions":
                     self._update_hover(event.pos, phone_rect)
+                elif self.current_screen == "gps":
+                    mx, my = event.pos
+                    if gps_rect is not None and gps_rect.collidepoint(mx, my):
+                        self.gps_hover_local = (
+                            (mx - gps_rect.x) * (PHONE_SCREEN_H / max(1.0, float(gps_rect.width))),
+                            (my - gps_rect.y) * (PHONE_SCREEN_W / max(1.0, float(gps_rect.height))),
+                        )
+                    else:
+                        self.gps_hover_local = None
 
     def _handle_kb_enter(self):
         """Handle Enter key on current screen."""
@@ -427,13 +585,19 @@ class PhoneUI:
                 self.scroll_offset = 0
                 self.shop_scroll = 0
                 self.garage_scroll = 0
+                self.guide_scroll = 0
+                self.gps_hover_local = None
                 self.kb_focus = 0
+                if self.current_screen == "gps":
+                    self.gps_legend_page = 0
                 self._emit_sound_event("ui_open")
         elif self.current_screen == "missions":
             ms = self.mission_system
             if ms.active_mission:
                 return  # Can't accept while one is active
             if 0 <= self.kb_focus < len(ms.available_missions):
+                if not self._can_start_party_mission():
+                    return
                 mission = ms.available_missions[self.kb_focus]
                 ok, _ = ms.accept_mission(mission.id, self._equipped_car())
                 if ok:
@@ -541,6 +705,8 @@ class PhoneUI:
             joinable = self._party_joinable_parties(parties, my_party)
             max_items = 1 + len(joinable)
             self.kb_focus = max(0, min(max_items - 1, self.kb_focus + direction))
+        elif self.current_screen == "wiki":
+            self.guide_scroll = max(0, min(self._guide_scroll_max, self.guide_scroll + direction * 26))
 
     def _handle_kb_left(self):
         if self.current_screen == "home":
@@ -582,7 +748,11 @@ class PhoneUI:
                 self.scroll_offset = 0
                 self.shop_scroll = 0
                 self.garage_scroll = 0
+                self.guide_scroll = 0
+                self.gps_hover_local = None
                 self.kb_focus = 0
+                if self.current_screen == "gps":
+                    self.gps_legend_page = 0
                 self._emit_sound_event("ui_open")
                 return
 
@@ -632,6 +802,8 @@ class PhoneUI:
             self.scroll_offset = 0
             self.shop_scroll = 0
             self.garage_scroll = 0
+            self.guide_scroll = 0
+            self.gps_hover_local = None
             self._emit_sound_event("ui_back")
 
     def _handle_missions_click(self, lx, ly):
@@ -658,6 +830,8 @@ class PhoneUI:
         # Missions disponibles → accepter
         for mission in ms.available_missions:
             if 8 < lx < PHONE_SCREEN_W - 8 and content_y < ly < content_y + MISSION_CARD_H:
+                if not self._can_start_party_mission():
+                    return
                 ok, _ = ms.accept_mission(mission.id, self._equipped_car())
                 if ok:
                     if self.player and hasattr(self.player, "reset_mission_telemetry"):
@@ -766,6 +940,10 @@ class PhoneUI:
         """Rendre le téléphone avec animation slide-up. Always show peek strip."""
         self.player = player
 
+        if self.current_screen == "gps" and (self.visible or self.gps_anim_progress > 0.0):
+            self._render_gps_landscape(screen, player, game_map)
+            return
+
         py = self._phone_y()
 
         # Always draw something (peek strip when closed, or full phone when open)
@@ -802,6 +980,8 @@ class PhoneUI:
             self._render_shop(content)
         elif self.current_screen == "garage":
             self._render_garage(content)
+        elif self.current_screen == "wiki":
+            self._render_wiki(content)
         elif self.current_screen == "stats":
             self._render_stats(content)
         elif self.current_screen == "leaderboard":
@@ -817,6 +997,39 @@ class PhoneUI:
             phone_surf.blit(self._phone_frame, (0, 0))
 
         screen.blit(phone_surf, (self.phone_x, py))
+
+    def _render_gps_landscape(self, screen, player=None, game_map=None):
+        state = self._gps_transform_state()
+        t_ease = state["t_ease"]
+
+        phone_base = pygame.Surface((PHONE_WIDTH, PHONE_HEIGHT), pygame.SRCALPHA)
+        content_portrait = pygame.Surface((PHONE_SCREEN_W, PHONE_SCREEN_H), pygame.SRCALPHA)
+        content_portrait.fill((14, 18, 24, 255))
+        self._render_gps(content_portrait, player, game_map)
+
+        content_landscape = pygame.Surface((PHONE_SCREEN_H, PHONE_SCREEN_W), pygame.SRCALPHA)
+        content_landscape.fill((14, 18, 24, 255))
+        self._render_gps(content_landscape, player, game_map)
+
+        # Counter-rotate content so after the phone left-rotation it appears upright.
+        counter_rotated = pygame.transform.rotate(content_landscape, -90)
+        if counter_rotated.get_size() != (PHONE_SCREEN_W, PHONE_SCREEN_H):
+            counter_rotated = pygame.transform.smoothscale(counter_rotated, (PHONE_SCREEN_W, PHONE_SCREEN_H))
+
+        blended_content = content_portrait.copy()
+        counter_rotated.set_alpha(int(255 * t_ease))
+        blended_content.blit(counter_rotated, (0, 0))
+        phone_base.blit(blended_content, (PHONE_SCREEN_X, PHONE_SCREEN_Y))
+
+        if self._phone_frame is not None:
+            phone_base.blit(self._phone_frame, (0, 0))
+        else:
+            pygame.draw.rect(phone_base, PHONE_BG, (0, 0, PHONE_WIDTH, PHONE_HEIGHT), border_radius=PHONE_RADIUS)
+            pygame.draw.rect(phone_base, PHONE_BORDER, (0, 0, PHONE_WIDTH, PHONE_HEIGHT), 2, border_radius=PHONE_RADIUS)
+
+        transformed = pygame.transform.rotozoom(phone_base, state["angle"], state["scale"])
+        phone_rect = transformed.get_rect(center=state["center"])
+        screen.blit(transformed, phone_rect.topleft)
 
     def _render_home(self, surf):
         """Écran d'accueil avec icônes d'applications."""
@@ -855,12 +1068,158 @@ class PhoneUI:
                 "gps": "phone.gps",
                 "shop": "phone.shop",
                 "garage": "phone.garage",
+                "wiki": "phone.wiki",
                 "stats": "phone.stats",
                 "leaderboard": "phone.top10",
                 "party": "phone.party",
             }.get(app["id"], app["name"])
             label = self.font_app_label.render(self._t(app_key) if app_key.startswith("phone.") else app_key, True, PHONE_TEXT_DIM)
             surf.blit(label, (ax + APP_ICON_SIZE // 2 - label.get_width() // 2, ay + APP_ICON_SIZE + 4))
+
+    def _render_wiki(self, surf):
+        """App Wiki: explique calcul des missions, cargos et impact du vehicule."""
+        self._render_back_button(surf, self._t("phone.wiki"))
+
+        sw = surf.get_width()
+        sh = surf.get_height()
+        clip_y = 24
+        clip_h = sh - clip_y - 4
+        clip = pygame.Surface((sw - 8, clip_h), pygame.SRCALPHA)
+
+        reward_ranges = {
+            "standard": REWARD_STANDARD,
+            "express": REWARD_EXPRESS,
+            "chain": REWARD_CHAIN,
+        }
+        time_ranges = {
+            "standard": TIME_STANDARD,
+            "express": TIME_EXPRESS,
+            "chain": TIME_CHAIN,
+        }
+
+        vehicle_profile = (
+            self.mission_system.get_vehicle_profile(self._equipped_car())
+            if hasattr(self.mission_system, "get_vehicle_profile")
+            else {}
+        )
+        mission_weights = (
+            self.mission_system._compute_mission_weights(self._equipped_car())
+            if hasattr(self.mission_system, "_compute_mission_weights")
+            else {"standard": 60.0, "express": 25.0, "chain": 15.0}
+        )
+        reward_factor = (
+            float(self.mission_system._vehicle_reward_factor(self._equipped_car()))
+            if hasattr(self.mission_system, "_vehicle_reward_factor")
+            else 1.0
+        )
+        unlock_state = self.mission_system.get_unlock_state() if hasattr(self.mission_system, "get_unlock_state") else {}
+
+        lines = []
+
+        def add_title(text):
+            lines.append((str(text), self.font_text, PHONE_TEXT, 2))
+
+        def add_body(text):
+            wrapped = self._wrap_text(self.font_small, text, clip.get_width() - 12, max_lines=3)
+            for item in wrapped:
+                lines.append((item, self.font_small, PHONE_TEXT_DIM, 0))
+
+        add_title(self._t("phone.lab_formula_title"))
+        add_body(self._t("phone.lab_formula_gen"))
+        add_body(self._t("phone.lab_formula_risky"))
+        add_body(self._t("phone.lab_formula_finish"))
+        add_body(self._t("phone.lab_formula_mods"))
+        lines.append(("", self.font_small, PHONE_TEXT_DIM, 4))
+
+        add_title(self._t("phone.lab_money_title"))
+        add_body(self._t("phone.lab_money_calc"))
+        for mtype in ("standard", "express", "chain"):
+            reward_low, reward_high = reward_ranges[mtype]
+            time_low, time_high = time_ranges[mtype]
+            risk_pct = int(round(float(RISKY_TYPE_BASE_CHANCE.get(mtype, 0.0)) * 100.0))
+            type_name = self._mission_type_label(mtype)
+            add_body(f"{type_name}: {int(reward_low)}-{int(reward_high)}$ | {int(time_low)}-{int(time_high)}s | risk {risk_pct}%")
+
+        avail = [int(getattr(m, "reward", 0) or 0) for m in list(getattr(self.mission_system, "available_missions", []) or [])]
+        if avail:
+            add_body(self._t("phone.lab_current_range", low=min(avail), high=max(avail)))
+        lines.append(("", self.font_small, PHONE_TEXT_DIM, 4))
+
+        vclass_key = str(vehicle_profile.get("vehicle_class", "compact") or "compact").lower()
+        vclass_label = self._t(f"mission.class.{vclass_key}")
+        if vclass_label == f"mission.class.{vclass_key}":
+            vclass_label = vclass_key
+
+        model_name = str(vehicle_profile.get("model", self._equipped_car()[0]) or self._equipped_car()[0])
+        max_speed = int(float(vehicle_profile.get("max_speed", 0.0) or 0.0))
+        capacity = int(float(vehicle_profile.get("cargo_capacity", 0.0) or 0.0))
+
+        add_title(self._t("phone.lab_vehicle_title"))
+        add_body(self._t("phone.lab_vehicle_profile", model=model_name, vclass=vclass_label, speed=max_speed, capacity=capacity))
+        add_body(
+            self._t(
+                "phone.lab_vehicle_weights",
+                standard=int(round(float(mission_weights.get("standard", 0.0) or 0.0))),
+                express=int(round(float(mission_weights.get("express", 0.0) or 0.0))),
+                chain=int(round(float(mission_weights.get("chain", 0.0) or 0.0))),
+            )
+        )
+        add_body(self._t("phone.lab_vehicle_reward_factor", factor=f"{reward_factor:.2f}"))
+
+        if mission_weights:
+            high_type = max(mission_weights, key=mission_weights.get)
+            low_type = min(mission_weights, key=mission_weights.get)
+            add_body(
+                self._t(
+                    "phone.lab_vehicle_bias",
+                    high=self._mission_type_label(high_type),
+                    low=self._mission_type_label(low_type),
+                )
+            )
+
+        unlocked_raw = list(unlock_state.get("unlocked_types", []) or []) if isinstance(unlock_state, dict) else []
+        unlocked_labels = [self._mission_type_label(name) for name in unlocked_raw if isinstance(name, str)]
+        if unlocked_labels:
+            add_body(
+                self._t(
+                    "phone.lab_vehicle_unlocks",
+                    tier=str(unlock_state.get("tier", "rookie") or "rookie").upper(),
+                    unlocked=", ".join(unlocked_labels),
+                )
+            )
+
+        lines.append(("", self.font_small, PHONE_TEXT_DIM, 4))
+
+        add_title(self._t("phone.lab_cargo_title"))
+        for mtype in ("standard", "express", "chain"):
+            type_name = self._mission_type_label(mtype)
+            add_body(f"{type_name}:")
+            for cargo in CARGO_POOL.get(mtype, []):
+                w_min, w_max = cargo.get("weight", (0, 0))
+                cargo_name = self._cargo_label(str(cargo.get("type", "colis")))
+                add_body(f"- {cargo_name}: {int(w_min)}-{int(w_max)} kg")
+            lines.append(("", self.font_small, PHONE_TEXT_DIM, 2))
+
+        total_h = 4
+        for _, font, _, gap in lines:
+            total_h += font.get_height() + 2 + gap
+
+        self._guide_scroll_max = max(0, total_h - clip_h)
+        self.guide_scroll = max(0, min(self._guide_scroll_max, self.guide_scroll))
+
+        y = 4 - self.guide_scroll
+        for text, font, color, gap in lines:
+            if text:
+                txt = font.render(text, True, color)
+                if y + txt.get_height() >= -2 and y <= clip_h + 2:
+                    clip.blit(txt, (6, y))
+            y += font.get_height() + 2 + gap
+
+        surf.blit(clip, (4, clip_y))
+
+        if self._guide_scroll_max > 0:
+            hint = self.font_small.render(self._t("phone.lab_scroll_hint"), True, PHONE_TEXT_DIM)
+            surf.blit(hint, (sw - hint.get_width() - 6, sh - hint.get_height() - 2))
 
     def _render_leaderboard(self, surf):
         self._render_back_button(surf, self._t("phone.top10"))
@@ -947,6 +1306,9 @@ class PhoneUI:
                 surf.blit(right, (ch_rect.right - right.get_width() - 8, ch_rect.y + 4))
                 surf.blit(tip, (ch_rect.x + 8, ch_rect.y + 18))
 
+            bonus = self.font_small.render(self._t("phone.party_bonus_50"), True, PHONE_YELLOW)
+            surf.blit(bonus, (sw - bonus.get_width() - 8, 24))
+
         y = 92
         for idx, (pid, party) in enumerate(joinable):
 
@@ -975,7 +1337,7 @@ class PhoneUI:
 
     def _render_back_button(self, surf, title_text):
         """Dessine le header avec bouton retour et titre."""
-        y = 2
+        y = 4
         back = self.font_title.render("< ", True, PHONE_ACCENT)
         surf.blit(back, (6, y))
         title = self.font_title.render(title_text, True, PHONE_TEXT)
@@ -983,14 +1345,26 @@ class PhoneUI:
 
     def _render_missions(self, surf):
         """App Livraisons : mission active + disponibles."""
-        self._render_back_button(surf, self._t("phone.deliveries"))
+        title_text = self._t("phone.deliveries")
+        self._render_back_button(surf, title_text)
         ms = self.mission_system
         sw = surf.get_width()
         sh = surf.get_height()
         car_model, car_color = self._equipped_car()
-        car_line = self._fit_text(self.font_small, self._t("phone.equipped", model=car_model, color=car_color), sw - 84)
+
+        # Keep equipped label in the free right-side header area to avoid colliding with title.
+        title_w = self.font_title.size(title_text)[0]
+        left_reserved = 26 + title_w + 12
+        right_edge = sw - 6
+        equip_max_w = max(48, right_edge - left_reserved)
+
+        car_line = self._fit_text(
+            self.font_small,
+            self._t("phone.equipped", model=car_model, color=car_color),
+            equip_max_w,
+        )
         car_text = self.font_small.render(car_line, True, PHONE_TEXT_DIM)
-        surf.blit(car_text, (sw - car_text.get_width() - 6, 4))
+        surf.blit(car_text, (right_edge - car_text.get_width(), 5))
 
         clip_y = 22
         clip_h = sh - clip_y
@@ -1127,37 +1501,95 @@ class PhoneUI:
 
     def _render_gps(self, surf, player=None, game_map=None):
         """App GPS : carte complète avec marqueurs."""
+        surf.fill((12, 18, 24))
+
         self._render_back_button(surf, self._t("phone.gps"))
         ms = self.mission_system
         sw = surf.get_width()
         sh = surf.get_height()
 
-        map_area_y = 22
-        map_size = min(sw - 16, sh - map_area_y - 50)
-        map_x = (sw - map_size) // 2
-        map_y = map_area_y + 4
+        pad = 10
+        map_area_y = 32
+        legend_row_h = max(16, self.font_small.get_height() + 4)
+        right_col_w = max(180, int(sw * 0.30))
+        map_w_px = max(220, sw - right_col_w - pad * 3)
+        map_h_px = max(150, sh - map_area_y - pad - legend_row_h)
+        map_x = pad
+        map_y = map_area_y
 
-        map_surf = pygame.Surface((map_size, map_size), pygame.SRCALPHA)
-        map_surf.fill((25, 40, 25))
-        pygame.draw.rect(map_surf, PHONE_BORDER, (0, 0, map_size, map_size), 1, border_radius=4)
+        map_surf = pygame.Surface((map_w_px, map_h_px), pygame.SRCALPHA)
+        if self._gps_minimap_bg is not None:
+            map_bg = pygame.transform.smoothscale(self._gps_minimap_bg, (map_w_px, map_h_px))
+            map_surf.blit(map_bg, (0, 0))
+            veil = pygame.Surface((map_w_px, map_h_px), pygame.SRCALPHA)
+            veil.fill((10, 14, 18, 70))
+            map_surf.blit(veil, (0, 0))
+        else:
+            map_surf.fill((25, 40, 25))
+        pygame.draw.rect(map_surf, PHONE_BORDER, (0, 0, map_w_px, map_h_px), 1, border_radius=4)
 
-        map_w = game_map.width_px if game_map else 8192
-        map_h = game_map.height_px if game_map else 8192
-        sx = map_size / map_w
-        sy = map_size / map_h
+        map_w = max(1.0, float(game_map.width_px) if game_map else 8192.0)
+        map_h = max(1.0, float(game_map.height_px) if game_map else 8192.0)
+        sx = map_w_px / map_w
+        sy = map_h_px / map_h
 
-        # Points d'intérêt
-        for loc in MISSION_LOCATIONS:
-            lx = int(loc['x'] * sx)
-            ly = int(loc['y'] * sy)
-            pygame.draw.circle(map_surf, (60, 60, 60), (lx, ly), 3)
-            name_surf = self.font_gps.render(loc['name'][:8], True, (100, 100, 100))
-            map_surf.blit(name_surf, (lx + 4, ly - 5))
+        hover_map_pos = None
+        if (
+            self.current_screen == "gps"
+            and isinstance(self.gps_hover_local, (tuple, list))
+            and len(self.gps_hover_local) >= 2
+            and sw >= sh
+        ):
+            hx = float(self.gps_hover_local[0])
+            hy = float(self.gps_hover_local[1])
+            if map_x <= hx <= map_x + map_w_px and map_y <= hy <= map_y + map_h_px:
+                hover_map_pos = (hx - map_x, hy - map_y)
+
+        hovered_poi = None
+        hovered_d2 = float("inf")
+
+        # Points d'intérêt indexés; noms complets lisibles dans la légende paginée.
+        for idx, loc in enumerate(MISSION_LOCATIONS, start=1):
+            lx = int(float(loc['x']) * sx)
+            ly = int(float(loc['y']) * sy)
+            pygame.draw.circle(map_surf, (95, 95, 95), (lx, ly), 2)
+            num = self.font_gps.render(str(idx), True, (220, 220, 220))
+            label_pos = (lx + 3, ly - 4)
+            map_surf.blit(num, label_pos)
+
+            if hover_map_pos is not None:
+                mx, my = hover_map_pos
+                label_rect = num.get_rect(topleft=label_pos).inflate(6, 6)
+                if label_rect.collidepoint(mx, my):
+                    cx, cy = label_rect.center
+                    d2 = (mx - cx) ** 2 + (my - cy) ** 2
+                    if d2 < hovered_d2:
+                        hovered_d2 = d2
+                        hovered_poi = (idx, lx, ly)
+
+        if hovered_poi is not None:
+            h_idx, h_x, h_y = hovered_poi
+            big_num = self.font_small.render(str(h_idx), True, (255, 255, 255))
+            big_pos = (h_x + 4, h_y - 6)
+            bg_rect = big_num.get_rect(topleft=big_pos).inflate(6, 4)
+            pygame.draw.rect(map_surf, (16, 24, 36), bg_rect, border_radius=3)
+            pygame.draw.rect(map_surf, PHONE_ACCENT, bg_rect, 1, border_radius=3)
+            pygame.draw.circle(map_surf, PHONE_ACCENT, (h_x, h_y), 5, 1)
+            map_surf.blit(big_num, big_pos)
+
+            if 1 <= h_idx <= len(MISSION_LOCATIONS):
+                hover_name = str(MISSION_LOCATIONS[h_idx - 1].get("name", ""))
+                hover_line = self._fit_text(self.font_small, f"#{h_idx} {hover_name}", map_w_px - 10)
+                hover_txt = self.font_small.render(hover_line, True, (255, 255, 255))
+                hover_bg = hover_txt.get_rect(topleft=(8, 6)).inflate(8, 4)
+                pygame.draw.rect(map_surf, (14, 20, 32), hover_bg, border_radius=3)
+                pygame.draw.rect(map_surf, PHONE_BORDER, hover_bg, 1, border_radius=3)
+                map_surf.blit(hover_txt, (8, 6))
 
         # Missions disponibles
         for m in ms.available_missions:
-            px = int(m.pickup['x'] * sx)
-            py_ = int(m.pickup['y'] * sy)
+            px = int(float(m.pickup['x']) * sx)
+            py_ = int(float(m.pickup['y']) * sy)
             pygame.draw.circle(map_surf, PHONE_YELLOW, (px, py_), 4)
 
         # Mission active
@@ -1168,8 +1600,8 @@ class PhoneUI:
                 py_ = int(m.pickup['y'] * sy)
                 pygame.draw.circle(map_surf, PHONE_GREEN, (px, py_), 6)
                 pygame.draw.circle(map_surf, (255, 255, 255), (px, py_), 6, 1)
-            dx = int(m.delivery['x'] * sx)
-            dy = int(m.delivery['y'] * sy)
+            dx = int(float(m.delivery['x']) * sx)
+            dy = int(float(m.delivery['y']) * sy)
             pygame.draw.circle(map_surf, PHONE_RED, (dx, dy), 6)
             pygame.draw.circle(map_surf, (255, 255, 255), (dx, dy), 6, 1)
 
@@ -1186,18 +1618,59 @@ class PhoneUI:
 
         surf.blit(map_surf, (map_x, map_y))
 
-        # Légende
-        legend_y = map_y + map_size + 6
+        legend_x = map_x + map_w_px + pad
+        legend_y = map_y
+        legend_w = sw - legend_x - pad
+        legend_h = map_h_px
+        legend = pygame.Surface((legend_w, legend_h), pygame.SRCALPHA)
+        legend.fill((18, 24, 33, 230))
+        pygame.draw.rect(legend, PHONE_BORDER, (0, 0, legend_w, legend_h), 1, border_radius=6)
+
+        title = self.font_small.render(self._t("phone.legend_places"), True, PHONE_TEXT)
+        legend.blit(title, (8, 6))
+
+        row_h = max(12, self.font_small.get_height() + 2)
+        hint = self.font_small.render(self._t("phone.legend_scroll_hint"), True, PHONE_TEXT_DIM)
+        hint_y = legend_h - hint.get_height() - 6
+        list_top = 24
+        list_bottom = max(list_top, hint_y - 6)
+        page_size = self._gps_legend_page_size(legend_h)
+        total = len(MISSION_LOCATIONS)
+        pages = max(1, math.ceil(total / page_size))
+        page_index = max(0, min(pages - 1, int(self.gps_legend_page)))
+        if sw >= sh:
+            self.gps_legend_page = page_index
+        page_text = self.font_small.render(f"{page_index + 1}/{pages}", True, PHONE_TEXT_DIM)
+        legend.blit(page_text, (legend_w - page_text.get_width() - 8, 6))
+
+        start = page_index * page_size
+        end = min(total, start + page_size)
+        y = list_top
+        for idx in range(start, end):
+            loc = MISSION_LOCATIONS[idx]
+            line = f"{idx + 1}. {loc['name']}"
+            row = self._fit_text(self.font_small, line, legend_w - 14)
+            txt = self.font_small.render(row, True, (210, 210, 220))
+            legend.blit(txt, (8, y))
+            y += row_h
+
+        legend.blit(hint, (8, hint_y))
+        surf.blit(legend, (legend_x, legend_y))
+
         legends = [
-            (PHONE_ACCENT, self._t("phone.legend_you")), (PHONE_GREEN, self._t("phone.legend_pickup")),
-            (PHONE_RED, self._t("phone.legend_dropoff")), (PHONE_YELLOW, self._t("phone.legend_available")),
+            (PHONE_ACCENT, self._t("phone.legend_you")),
+            (PHONE_GREEN, self._t("phone.legend_pickup")),
+            (PHONE_RED, self._t("phone.legend_dropoff")),
+            (PHONE_YELLOW, self._t("phone.legend_available")),
         ]
-        lx_pos = 10
+        lx_pos = map_x
+        ly_pos = map_y + map_h_px + max(1, (legend_row_h - self.font_small.get_height()) // 2)
         for color, text in legends:
-            pygame.draw.circle(surf, color, (lx_pos + 5, legend_y + 7), 4)
             t = self.font_small.render(text, True, PHONE_TEXT_DIM)
-            surf.blit(t, (lx_pos + 13, legend_y))
-            lx_pos += t.get_width() + 20
+            cy = ly_pos + t.get_height() // 2
+            pygame.draw.circle(surf, color, (lx_pos + 5, cy), 4)
+            surf.blit(t, (lx_pos + 13, ly_pos))
+            lx_pos += t.get_width() + 22
 
     def _render_shop(self, surf):
         """App Boutique : catalogue avec aperçu voiture, stats et achat."""
@@ -1293,13 +1766,17 @@ class PhoneUI:
 
             # Description + hint gameplay
             hint_text = self._t(self._vehicle_mission_hint(stats))
-            footer_w = max(20, w - text_x_offset - 90)
+            footer_w = max(28, w - text_x_offset - 84)
             desc_line = self._fit_text(self.font_small, stats.get("desc", ""), footer_w)
-            hint_line = self._fit_text(self.font_small, hint_text, footer_w)
+            hint_lines = self._wrap_text(self.font_small, hint_text, footer_w, max_lines=2)
             desc = self.font_small.render(desc_line, True, PHONE_TEXT_DIM)
-            hint = self.font_small.render(hint_line, True, PHONE_ACCENT)
-            card.blit(desc, (text_x_offset, card_h - 40))
-            card.blit(hint, (text_x_offset, card_h - 26))
+            card.blit(desc, (text_x_offset, card_h - 42))
+
+            hint_y = card_h - 29
+            for line in hint_lines:
+                hint = self.font_small.render(line, True, PHONE_ACCENT)
+                card.blit(hint, (text_x_offset, hint_y))
+                hint_y += self.font_small.get_height() + 1
 
             # Buy/equip button
             owned = ms.has_car(model, sel_color)

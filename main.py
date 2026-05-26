@@ -15,11 +15,13 @@ from modules import (
 
 CONFIG_PATH = Path('config.json')
 SOLO_SAVE_PATH = Path('solo_save.json')
+DEFAULT_SPAWN_X = 2699.0
+DEFAULT_SPAWN_Y = 1341.0
 
 # ── Config (settings only) ──────────────────────────
 
 _CONFIG_DEFAULTS = {
-    "resolution": [1920, 1080],
+    "resolution": [1280, 720],
     "fullscreen": False,
     "fps": 60,
     "map_zoom": 2.0,
@@ -28,7 +30,7 @@ _CONFIG_DEFAULTS = {
     "effects_volume": 0.75,
     "robber_difficulty": 4,
     "language": "fr",
-    "server_ip": "127.0.0.1",
+    "server_ip": "play.deliveryrush.lol",
     "server_port": 12345,
     "multi": {
         "username": "",
@@ -62,8 +64,8 @@ _SOLO_DEFAULTS = {
     "audio_settings": {
         "music_state": "menu",
     },
-    "x": 6000.0,
-    "y": 6000.0,
+    "x": DEFAULT_SPAWN_X,
+    "y": DEFAULT_SPAWN_Y,
     "angle": 0.0,
 }
 
@@ -310,7 +312,7 @@ def main():
     other_players = {}  # Vue fusionnée pour rendu/collisions (joueurs distants + IA)
     remote_players = {}  # Joueurs distants uniquement (réseau)
     ai_manager = None  # IA locale (solo)
-    ai_tick_rate = 8.0
+    ai_tick_rate = 6.0
     ai_tick_interval = 1.0 / ai_tick_rate
     ai_tick_accumulator = 0.0
     ai_world_cache = {}
@@ -470,8 +472,8 @@ def main():
                     spd = network_client.server_player_data
                     multi_car = (spd.get('car_model', 'MICRO'), spd.get('car_color', 'White'))
                     player_obj = Player(multi_car, player_world)
-                    player_obj.x = spd.get('last_x', 6000.0)
-                    player_obj.y = spd.get('last_y', 6000.0)
+                    player_obj.x = spd.get('last_x', DEFAULT_SPAWN_X)
+                    player_obj.y = spd.get('last_y', DEFAULT_SPAWN_Y)
                     player_obj.angle = spd.get('last_angle', 0.0)
                     player_obj.distance_traveled = spd.get('total_distance', 0.0)
 
@@ -525,8 +527,8 @@ def main():
                     solo = _solo
                     solo_car = (solo.get("car_model", "MICRO"), solo.get("car_color", "White"))
                     player_obj = Player(solo_car, player_world)
-                    player_obj.x = solo.get("x", 6000.0)
-                    player_obj.y = solo.get("y", 6000.0)
+                    player_obj.x = solo.get("x", DEFAULT_SPAWN_X)
+                    player_obj.y = solo.get("y", DEFAULT_SPAWN_Y)
                     player_obj.angle = solo.get("angle", 0.0)
                     player_obj.distance_traveled = solo.get("total_distance", 0.0)
 
@@ -584,26 +586,26 @@ def main():
                 robbery_close_count = 0
                 if not multiplayer:
                     ai_manager.configure_performance(
-                        active_update_radius=1300.0,
-                        obstacle_neighbor_radius=0.0,
-                        use_dynamic_obstacles=False,
+                        active_update_radius=880.0,
+                        obstacle_neighbor_radius=240.0,
+                        use_dynamic_obstacles=True,
                     )
                     ai_manager.configure_dynamic_traffic(
                         enabled=True,
-                        target_count=8,
-                        spawn_min_distance=520.0,
-                        spawn_radius=1500.0,
-                        despawn_radius=2600.0,
-                        center_bias=0.62,
-                        rebalance_interval=0.38,
-                        spawn_batch=1,
-                        edge_despawn_margin=48.0,
+                        target_count=44,
+                        spawn_min_distance=260.0,
+                        spawn_radius=1850.0,
+                        despawn_radius=3100.0,
+                        center_bias=0.48,
+                        rebalance_interval=0.16,
+                        spawn_batch=3,
+                        edge_despawn_margin=36.0,
                     )
                     player_center = (
                         player_obj.x + player_obj.size * 0.5,
                         player_obj.y + player_obj.size * 0.5,
                     )
-                    ai_manager.spawn_traffic(game_map, count=6, focus_points=[player_center])
+                    ai_manager.spawn_traffic(game_map, count=16, focus_points=[player_center])
                 else:
                     ai_manager.configure_performance(
                         active_update_radius=1200.0,
@@ -710,7 +712,11 @@ def main():
                             if hasattr(sound_manager, 'play_event'):
                                 sound_manager.play_event('ui_open')
                     elif event.type == pygame.KEYDOWN and event.key == pygame.K_c:
-                        game_map.show_collisions = not game_map.show_collisions
+                        show_collisions = getattr(game_map, 'show_collisions', False)
+                        show_ai_debug = getattr(game_map, 'show_ai_debug', False)
+                        debug_on = bool(show_collisions or show_ai_debug)
+                        game_map.show_collisions = not debug_on
+                        game_map.show_ai_debug = not debug_on
 
                 # Gérer les événements du téléphone
                 if phone_ui and phone_ui.visible:
@@ -741,7 +747,7 @@ def main():
                         and str(getattr(mission_system.active_mission, 'risk_level', 'chill')).lower() == 'risky'
                     )
 
-                    if ai_manager:
+                    if ai_manager and not multiplayer:
                         if risky_mission_active:
                             player_center = (
                                 game_ui.player.x + game_ui.player.size * 0.5,
@@ -773,13 +779,18 @@ def main():
 
                         ai_render_players = AIManager.entities_to_other_players(ai_world_cache, prefix="AI")
 
-                    robber_entities = []
-                    if isinstance(ai_world_cache, dict):
-                        robber_entities = [
-                            payload
-                            for payload in ai_world_cache.values()
-                            if isinstance(payload, dict) and str(payload.get('ai_kind', '')).lower() == 'robber'
-                        ]
+                    combined_players = dict(remote_players)
+                    combined_players.update(ai_render_players)
+                    other_players.clear()
+                    other_players.update(combined_players)
+
+                    robber_entities = [
+                        pdata
+                        for pdata in other_players.values()
+                        if isinstance(pdata, dict)
+                        and bool(pdata.get('ai', False))
+                        and str(pdata.get('ai_kind', '')).lower() == 'robber'
+                    ]
 
                     if risky_mission_active and mission_system and mission_system.active_mission:
                         player_cx = game_ui.player.x + game_ui.player.size * 0.5
@@ -806,7 +817,7 @@ def main():
                             if mission_system.fail_active_mission(reason='robbed', player_stats=telemetry):
                                 robbery_pressure = 0.0
                                 robbery_close_count = 0
-                                if ai_manager:
+                                if ai_manager and not multiplayer:
                                     ai_manager.ensure_robbers(game_map, target_count=0, enabled=False)
                     else:
                         robbery_pressure = max(0.0, robbery_pressure - dt * 0.45)
@@ -819,11 +830,6 @@ def main():
                             robber_count=len(robber_entities),
                             close_count=robbery_close_count,
                         )
-
-                    combined_players = dict(remote_players)
-                    combined_players.update(ai_render_players)
-                    other_players.clear()
-                    other_players.update(combined_players)
 
                     # Construction des rectangles de collision (joueurs distants + IA)
                     other_rects = []
@@ -878,6 +884,27 @@ def main():
 
                     # Mise à jour du système de missions
                     if mission_system and game_ui:
+                        if multiplayer and network_client and getattr(network_client, 'coop_notifications', None):
+                            local_user = str(getattr(network_client, 'username', '') or getattr(game_ui, 'username', '') or '')
+                            for notice in list(network_client.coop_notifications):
+                                if not isinstance(notice, dict):
+                                    continue
+                                mission_payload = notice.get('mission')
+                                participants = [str(p) for p in (notice.get('participants', []) or []) if str(p)]
+                                if participants and local_user and local_user not in participants:
+                                    continue
+
+                                activated = False
+                                if hasattr(mission_system, 'activate_network_mission'):
+                                    activated = bool(mission_system.activate_network_mission(mission_payload, equipped_car=game_ui.player.car))
+                                if activated:
+                                    if hasattr(game_ui.player, 'reset_mission_telemetry'):
+                                        game_ui.player.reset_mission_telemetry()
+                                    if hasattr(sound_manager, 'play_event'):
+                                        sound_manager.play_event('mission_accept')
+
+                            network_client.coop_notifications.clear()
+
                         player_cx = game_ui.player.x + game_ui.player.size / 2
                         player_cy = game_ui.player.y + game_ui.player.size / 2
                         telemetry = (

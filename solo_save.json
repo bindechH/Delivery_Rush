@@ -1,60 +1,16 @@
 {
-  "username": "mohamedzeaezaezaeza",
-  "car_model": "SUPERCAR",
-  "car_color": "Red",
-  "money": 99985942,
+  "username": "player1",
+  "car_model": "MICRO",
+  "car_color": "White",
+  "money": 0,
   "owned_cars": [
     {
       "model": "MICRO",
       "color": "White"
-    },
-    {
-      "model": "COUPE",
-      "color": "Magenta"
-    },
-    {
-      "model": "SEDAN",
-      "color": "Red"
-    },
-    {
-      "model": "SUV",
-      "color": "Blue"
-    },
-    {
-      "model": "HATCHBACK",
-      "color": "Magenta"
-    },
-    {
-      "model": "VAN",
-      "color": "Black"
-    },
-    {
-      "model": "MINIVAN",
-      "color": "Magenta"
-    },
-    {
-      "model": "BOX TRUCK",
-      "color": "Black"
-    },
-    {
-      "model": "SUPERCAR",
-      "color": "Red"
-    },
-    {
-      "model": "MICRO",
-      "color": "Blue"
-    },
-    {
-      "model": "MICRO",
-      "color": "Brown"
     }
   ],
-  "completed_missions": 7,
-  "failed_missions": 6,
-  "total_distance": 781218.6286961315,
-  "x": 4424.583087734635,
-  "y": 7846.756702095307,
-  "angle": -15663.476799461936,
+  "completed_missions": 0,
+  "failed_missions": 0,
   "reputation": 0,
   "unlock_state": {
     "tier": "rookie",
@@ -65,14 +21,16 @@
   },
   "mission_stats": {
     "current_streak": 0,
-    "best_streak": 2,
+    "best_streak": 0,
     "bonus_earned": 0,
-    "penalty_taken": 2387
+    "penalty_taken": 0
   },
-  "last_vehicle_class": "super",
+  "total_distance": 0.0,
+  "last_vehicle_class": "compact",
   "audio_settings": {
-    "music_state": "gameplay",
-    "music_volume": 0.1,
-    "effects_volume": 0.1
-  }
+    "music_state": "menu"
+  },
+  "x": 2699.0,
+  "y": 1341.0,
+  "angle": 0.0
 }

@@ -233,7 +233,7 @@ class SoundManager:
             "collision_heavy": pick("assets/sounds/collision_heavy.mp3", "assets/sounds/collision_heavy.ogg", "assets/sounds/collision_heavy.wav"),
             "drift_start": pick("assets/sounds/drift.mp3", "assets/sounds/drift.ogg", "assets/sounds/drift.wav"),
             "drift_stop": pick("assets/sounds/drift.mp3", "assets/sounds/drift.ogg", "assets/sounds/drift.wav"),
-            "brake": pick("assets/sounds/collision_light.mp3", "assets/sounds/ui_back.mp3"),
+            "brake": pick("assets/sounds/brake.mp3", "assets/sounds/brake.ogg", "assets/sounds/brake.wav", "assets/sounds/ui_back.mp3"),
             "engine_loop": pick("assets/sounds/engine_loop.mp3", "assets/sounds/engine_loop.ogg", "assets/sounds/engine_loop.wav"),
         }
 

@@ -9,7 +9,8 @@ import socket
 import time
 
 # Configuration réseau
-BUFFER_SIZE = 8192  # Taille maximale des paquets UDP
+# 64 KiB socket read buffer: avoids WSAEMSGSIZE when server sends larger world snapshots.
+BUFFER_SIZE = 65535
 HANDSHAKE_TIMEOUT = 1.0  # Timeout pour le handshake initial
 MAX_RECV_BATCH = 10  # Évite une boucle infinie si trop de paquets
 INTERP_DELAY = 0.1  # Délai d'interpolation en secondes

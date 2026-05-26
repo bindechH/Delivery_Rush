@@ -512,6 +512,7 @@ class Mission:
         stops: Optional[List[Dict[str, Any]]] = None,
         current_stop_index: int = 0,
         risk_level: str = "chill",
+        party_mission: bool = False,
     ):
         self.id = mission_id
         self.type = mission_type  # 'standard', 'express', 'chain'
@@ -531,6 +532,7 @@ class Mission:
             self.stops = self._default_stops()
         self.current_stop_index = max(0, min(int(current_stop_index or 0), len(self.stops) - 1))
         self.risk_level = "risky" if str(risk_level or "").strip().lower() == "risky" else "chill"
+        self.party_mission = bool(party_mission)
 
     def _default_stops(self) -> List[Dict[str, Any]]:
         return [
@@ -567,6 +569,7 @@ class Mission:
             "stops": [dict(stop) for stop in self.stops],
             "current_stop_index": self.current_stop_index,
             "risk_level": self.risk_level,
+            "party_mission": self.party_mission,
         }
 
     @staticmethod
@@ -586,6 +589,7 @@ class Mission:
             stops=data.get("stops"),
             current_stop_index=int(data.get("current_stop_index", 0) or 0),
             risk_level=str(data.get("risk_level", "chill") or "chill"),
+            party_mission=bool(data.get("party_mission", False)),
         )
         m.time_remaining = data.get("time_remaining", data["time_limit"])
         m.status = data.get("status", "available")
@@ -1148,6 +1152,49 @@ class MissionSystem:
         )
         return True
 
+    def activate_network_mission(self, mission_payload: Dict[str, Any], equipped_car: Optional[Any] = None) -> bool:
+        """Active/synchronise une mission imposée par le serveur (party/coop)."""
+        if not isinstance(mission_payload, dict):
+            return False
+
+        status = str(mission_payload.get("status", "active") or "active").lower()
+        if status not in ("active", "accepted", "picked_up", "in_progress"):
+            return False
+
+        if equipped_car is not None:
+            self.current_car = self._normalize_equipped_car(equipped_car)
+
+        try:
+            synced = Mission.from_dict(mission_payload)
+        except Exception:
+            return False
+
+        try:
+            synced_id = int(synced.id)
+        except Exception:
+            return False
+
+        if self.active_mission is not None:
+            try:
+                active_id = int(self.active_mission.id)
+            except Exception:
+                active_id = -1
+            if active_id != synced_id:
+                return False
+
+        if synced.current_stop_index >= len(synced.stops):
+            synced.current_stop_index = max(0, len(synced.stops) - 1)
+
+        synced.status = "picked_up" if synced.picked_up or synced.current_stop_index > 0 else "accepted"
+
+        self.available_missions = [
+            m for m in self.available_missions
+            if int(getattr(m, "id", -1)) != synced_id
+        ]
+        self.active_mission = synced
+        self._last_accepted_mission = synced
+        return True
+
     def abandon_mission(self) -> bool:
         """Abandonne la mission en cours."""
         if self.active_mission is None:
@@ -1233,6 +1280,25 @@ class MissionSystem:
         if not objective:
             return
 
+        if bool(getattr(mission, "party_mission", False)) and mission.picked_up:
+            matched_index: Optional[int] = None
+            matched_dist: Optional[float] = None
+            for idx in range(int(mission.current_stop_index), len(mission.stops)):
+                stop = mission.stops[idx]
+                stop_kind = str(stop.get("kind", "stop"))
+                stop_radius = DELIVERY_RADIUS if stop_kind == "dropoff" else PICKUP_RADIUS
+                stop_dist = math.hypot(player_x - float(stop.get("x", 0.0)), player_y - float(stop.get("y", 0.0)))
+                if stop_dist > stop_radius:
+                    continue
+                if matched_dist is None or stop_dist < matched_dist:
+                    matched_index = idx
+                    matched_dist = stop_dist
+
+            if matched_index is not None and matched_index != int(mission.current_stop_index):
+                curr = int(mission.current_stop_index)
+                mission.stops[curr], mission.stops[matched_index] = mission.stops[matched_index], mission.stops[curr]
+                objective = self.get_current_objective() or objective
+
         radius = DELIVERY_RADIUS if objective.get("kind") == "dropoff" else PICKUP_RADIUS
         dist = math.hypot(player_x - float(objective.get("x", 0.0)), player_y - float(objective.get("y", 0.0)))
         if dist > radius:
@@ -1309,7 +1375,6 @@ class MissionSystem:
         raw = dict(player_stats or {}) if isinstance(player_stats, dict) else {}
         return {
             "collision_count": max(0.0, float(raw.get("collision_count", 0.0) or 0.0)),
-            "offroad_time": max(0.0, float(raw.get("offroad_time", 0.0) or 0.0)),
             "drift_time": max(0.0, float(raw.get("drift_time", 0.0) or 0.0)),
             "avg_speed_kmh": max(0.0, float(raw.get("avg_speed_kmh", 0.0) or 0.0)),
             "mission_time": max(0.0, float(raw.get("mission_time", 0.0) or 0.0)),
@@ -1350,13 +1415,6 @@ class MissionSystem:
             multiplier -= malus
             modifiers.append({"name": "collisions", "delta": -malus})
 
-        elapsed = max(1.0, elapsed_time)
-        offroad_ratio = min(1.0, telemetry["offroad_time"] / elapsed)
-        if offroad_ratio > 0.15:
-            malus = min(0.25, (offroad_ratio - 0.15) * 0.7)
-            multiplier -= malus
-            modifiers.append({"name": "hors_route", "delta": -malus})
-
         if telemetry["drift_time"] >= 3.0 and mission.type in ("express", "chain"):
             bonus = min(0.08, telemetry["drift_time"] / 100.0)
             multiplier += bonus
@@ -1391,8 +1449,6 @@ class MissionSystem:
                 base += 1
             if telemetry["collision_count"] <= 0.0:
                 base += 1
-            if telemetry["offroad_time"] > 25.0:
-                base -= 1
             return max(1, base)
 
         if reason == "abandon":
@@ -1464,6 +1520,10 @@ class MissionSystem:
 
     def get_notification(self) -> str:
         return self._last_notification if self._notification_timer > 0 else ""
+
+    def set_external_notification(self, text: str, duration: float = 3.0) -> None:
+        """Expose une notification UI courte pour des règles réseau."""
+        self._set_notification(str(text or ""), duration=max(0.5, float(duration or 0.0)))
 
     def consume_last_result(self) -> Optional[Dict[str, Any]]:
         """Retourne puis efface le dernier résultat de mission (one-shot)."""

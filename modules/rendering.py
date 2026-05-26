@@ -5,6 +5,7 @@ Fournit des fonctions utilitaires pour le texte et les sprites.
 """
 
 import math
+import hashlib
 import pygame
 from pathlib import Path
 from .player import Player, resolve_car_frame_path, VEHICLE_CATALOG, VEHICLE_COLORS
@@ -623,6 +624,7 @@ class GameUI:
         self._mission_result_duration = 5.5
         self._objective_sprite_cache = {}
         self.party_by_player = {}
+        self.party_color_by_id = {}
         self.robbery_active = False
         self.robbery_pressure = 0.0
         self.robber_count = 0
@@ -692,6 +694,30 @@ class GameUI:
             frames[idx] = img
         return frames[idx]
 
+    def _get_small_car_icon(self, car, icon_size=20):
+        car_key = (tuple(car), int(icon_size))
+        if car_key not in self.car_images_small:
+            base = self._get_car_image(car)
+            self.car_images_small[car_key] = pygame.transform.smoothscale(base, (icon_size, icon_size))
+        return self.car_images_small[car_key]
+
+    @staticmethod
+    def _party_color(party_id):
+        digest = hashlib.md5(str(party_id).encode("utf-8")).hexdigest()
+        hue_src = int(digest[:8], 16)
+        hue = float(hue_src % 360)
+        saturation = 78.0 + float((hue_src >> 9) % 18)   # 78..95
+        value = 92.0 + float((hue_src >> 17) % 9)        # 92..100
+        color = pygame.Color(255, 255, 255)
+        color.hsva = (hue, saturation, value, 100.0)
+        return int(color.r), int(color.g), int(color.b)
+
+    def _name_color_for_player(self, username):
+        party_id = self.party_by_player.get(str(username), "")
+        if not party_id:
+            return 255, 255, 255
+        return self.party_color_by_id.get(party_id, (255, 255, 255))
+
     def update_camera(self):
         """Centrer la caméra sur la position du joueur.
 
@@ -732,24 +758,24 @@ class GameUI:
         self.update_camera()
 
     def set_party_snapshot(self, party_state):
-        """Injecte l'état de party réseau pour affichage HUD (TAB list)."""
+        """Injecte l'état de party réseau pour colorer les joueurs d'une même party."""
         mapping = {}
+        color_by_party = {}
         if isinstance(party_state, dict):
             parties = party_state.get('parties', {})
             if isinstance(parties, dict):
                 for party_id, pdata in parties.items():
                     if not isinstance(pdata, dict):
                         continue
+                    pid = str(party_id)
+                    color_by_party[pid] = self._party_color(pid)
                     members = pdata.get('members', []) if isinstance(pdata.get('members'), list) else []
-                    leader = str(pdata.get('leader', ''))
                     for member in members:
                         member_name = str(member)
                         if member_name:
-                            tag = str(party_id)
-                            if member_name == leader:
-                                tag = f"{tag}*"
-                            mapping[member_name] = tag
+                            mapping[member_name] = pid
         self.party_by_player = mapping
+        self.party_color_by_id = color_by_party
 
     def set_robbery_status(self, active=False, pressure=0.0, robber_count=0, close_count=0):
         """Injecte l'état de pression des braqueurs pour le HUD."""
@@ -766,6 +792,7 @@ class GameUI:
         self._render_drift_trail()
         self._render_mission_markers()
         self._render_other_players()
+        self._render_ai_debug()
         self._render_player()
         self._render_hud()
         self._render_gps_arrow()
@@ -811,7 +838,14 @@ class GameUI:
                 if not is_ai:
                     label_center_x = int(cx)
                     label_top_y = int(cy - raw_image.get_height() / 2 - 22)
-                    draw_text_bg_center(self.screen, player_username, self.name_font, (255, 255, 255), label_center_x, label_top_y)
+                    draw_text_bg_center(
+                        self.screen,
+                        player_username,
+                        self.name_font,
+                        self._name_color_for_player(player_username),
+                        label_center_x,
+                        label_top_y,
+                    )
                 elif ai_kind == 'robber':
                     label_center_x = int(cx)
                     label_top_y = int(cy - raw_image.get_height() / 2 - 22)
@@ -838,7 +872,14 @@ class GameUI:
         cy = (self.player.y + self.player.size / 2 - self.camera_y) * zoom
         label_center_x = int(cx)
         label_top_y = int(cy - self.player.size / 2 - 22)
-        draw_text_bg_center(self.screen, self.username, self.name_font, (255, 255, 255), label_center_x, label_top_y)
+        draw_text_bg_center(
+            self.screen,
+            self.username,
+            self.name_font,
+            self._name_color_for_player(self.username),
+            label_center_x,
+            label_top_y,
+        )
         # Debug: draw hitbox when collision display is active
         if getattr(self.game_map, 'show_collisions', False):
             hitbox = self.player.get_hitbox_rect()
@@ -855,57 +896,87 @@ class GameUI:
         if not self.show_tab_list:
             return
 
-        all_players = [(self.username, {
-            'x': self.player.x, 'y': self.player.y,
-            'car': self.player.car,
-            'on_road': getattr(self.player, 'on_road', True),
-        })]
+        all_players = [
+            (
+                self.username,
+                {
+                    "car": self.player.car,
+                },
+            )
+        ]
         for uname, data in self.other_players.items():
-            if isinstance(data, dict) and not data.get('ai', False):
+            if isinstance(data, dict) and not data.get("ai", False):
                 all_players.append((uname, data))
 
-        panel_w = 540
-        line_h = 32
-        header_h = 52
-        panel_h = header_h + line_h * len(all_players) + 10
+        if len(all_players) > 1:
+            first = all_players[0]
+            tail = sorted(all_players[1:], key=lambda row: str(row[0]).lower())
+            all_players = [first] + tail
+
+        panel_margin = 20
+        panel_y = 56
+        panel_w = min(self.screen_width - panel_margin * 2, 440)
         panel_x = (self.screen_width - panel_w) // 2
-        panel_y = 60
+
+        title_h = 30
+        row_h = 38
+        icon_size = 24
+        icon_gap = 10
+        footer_h = 22
+        inner_pad = 14
+
+        reserved_h = 12 + title_h
+        max_rows = max(1, (self.screen_height - panel_y - panel_margin - reserved_h - footer_h) // row_h)
+        visible_players = all_players[:max_rows]
+        hidden_count = max(0, len(all_players) - len(visible_players))
+        footer_space = footer_h if hidden_count > 0 else 0
+
+        panel_h = 12 + title_h + row_h * len(visible_players) + footer_space
 
         panel = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
-        panel.fill((10, 10, 25, 210))
-        pygame.draw.rect(panel, (80, 80, 120), (0, 0, panel_w, panel_h), 2, border_radius=8)
+        panel.fill((10, 10, 24, 210))
+        pygame.draw.rect(panel, (90, 95, 136), (0, 0, panel_w, panel_h), 2, border_radius=8)
 
-        header_lbl = self.hud_font.render(self._t("hud.players_online"), True, (200, 200, 255))
-        panel.blit(header_lbl, (panel_w // 2 - header_lbl.get_width() // 2, 6))
+        title_text = self.hud_font.render(self._t("hud.players_online"), True, (210, 210, 255))
+        panel.blit(title_text, (panel_w // 2 - title_text.get_width() // 2, 7))
 
-        hdr_name = self.hud_font_small.render("PLAYER", True, (170, 170, 205))
-        hdr_pos = self.hud_font_small.render("POS", True, (170, 170, 205))
-        hdr_party = self.hud_font_small.render(self._t("hud.party"), True, (170, 170, 205))
-        hdr_surface = self.hud_font_small.render("SURFACE", True, (170, 170, 205))
-        panel.blit(hdr_name, (10, header_h - 4))
-        panel.blit(hdr_pos, (190, header_h - 4))
-        panel.blit(hdr_party, (340, header_h - 4))
-        panel.blit(hdr_surface, (panel_w - hdr_surface.get_width() - 10, header_h - 4))
+        row_y0 = 12 + title_h
+        for idx, (uname, pdata) in enumerate(visible_players):
+            row_y = row_y0 + idx * row_h
+            row_rect = pygame.Rect(8, row_y, panel_w - 16, row_h)
 
-        y = header_h
-        for uname, pdata in all_players:
-            px = pdata.get('x', 0)
-            py = pdata.get('y', 0)
-            on_road = pdata.get('on_road', True)
-            surface_str = self._t("hud.road") if on_road else self._t("hud.offroad")
-            surface_col = (100, 255, 100) if on_road else (255, 180, 80)
-            party_tag = self.party_by_player.get(uname, "-")
+            if idx % 2 == 0:
+                pygame.draw.rect(panel, (16, 18, 34, 130), row_rect)
 
-            name_surf = self.hud_font_small.render(uname, True, (240, 240, 255))
-            pos_surf = self.hud_font_small.render(f"({int(px)}, {int(py)})", True, (160, 160, 180))
-            party_surf = self.hud_font_small.render(str(party_tag), True, (130, 210, 255) if party_tag != "-" else (120, 120, 145))
-            road_surf = self.hud_font_small.render(surface_str, True, surface_col)
+            if str(uname) == str(self.username):
+                pygame.draw.rect(panel, (70, 110, 190), row_rect, 1, border_radius=4)
 
-            panel.blit(name_surf, (10, y + 4))
-            panel.blit(pos_surf, (190, y + 4))
-            panel.blit(party_surf, (340, y + 4))
-            panel.blit(road_surf, (panel_w - road_surf.get_width() - 10, y + 4))
-            y += line_h
+            car = pdata.get("car", ("MICRO", "White")) if isinstance(pdata, dict) else ("MICRO", "White")
+            if isinstance(car, (list, tuple)) and len(car) >= 2:
+                car_model = str(car[0])
+                car_color = str(car[1])
+            else:
+                car_model, car_color = "MICRO", "White"
+
+            icon = self._get_small_car_icon((car_model, car_color), icon_size=icon_size)
+            icon_y = row_y + (row_h - icon_size) // 2
+            max_name_w = max(50, panel_w - inner_pad * 2 - icon_size - icon_gap)
+            name_text = self._fit_text(self.hud_font_small, uname, max_name_w)
+            name_surf = self.hud_font_small.render(name_text, True, self._name_color_for_player(uname))
+            name_y = row_y + (row_h - name_surf.get_height()) // 2
+
+            content_w = icon_size + icon_gap + name_surf.get_width()
+            content_x = max(inner_pad, (panel_w - content_w) // 2)
+            panel.blit(icon, (content_x, icon_y))
+            panel.blit(name_surf, (content_x + icon_size + icon_gap, name_y))
+
+            pygame.draw.line(panel, (44, 48, 74), (8, row_y + row_h - 1), (panel_w - 8, row_y + row_h - 1), 1)
+
+        if hidden_count > 0:
+            footer_y = row_y0 + row_h * len(visible_players)
+            pygame.draw.rect(panel, (14, 14, 28, 190), (8, footer_y, panel_w - 16, footer_h), border_radius=4)
+            more_text = self.hud_font_small.render(f"+{hidden_count} more", True, (175, 178, 205))
+            panel.blit(more_text, (panel_w // 2 - more_text.get_width() // 2, footer_y + (footer_h - more_text.get_height()) // 2))
 
         self.screen.blit(panel, (panel_x, panel_y))
 
@@ -925,6 +996,20 @@ class GameUI:
         speed_bg.fill((0, 0, 0, 180))
         speed_bg.blit(speed_surf, (8, 5))
         self.screen.blit(speed_bg, (minimap_x, minimap_y - speed_bg.get_height() - 6))
+
+        show_collisions = bool(getattr(self.game_map, 'show_collisions', False))
+        show_ai_debug = bool(getattr(self.game_map, 'show_ai_debug', False))
+        debug_text = None
+        if show_collisions and show_ai_debug:
+            debug_text = "DEBUG: FULL AI"
+        elif show_ai_debug:
+            debug_text = "DEBUG: AI"
+        elif show_collisions:
+            debug_text = "DEBUG: COLLISIONS"
+
+        if debug_text:
+            debug_label = self.hud_font_small.render(debug_text, True, (255, 210, 120))
+            self.screen.blit(debug_label, (minimap_x, minimap_y - speed_bg.get_height() - 34))
 
         if self.robbery_active or self.robbery_pressure > 0.01:
             bar_w = 200
@@ -1168,12 +1253,6 @@ class GameUI:
         for _, pdata in self.other_players.items():
             if isinstance(pdata, dict):
                 if pdata.get('ai', False):
-                    ai_kind = str(pdata.get('ai_kind', '') or '').lower()
-                    if ai_kind == 'robber':
-                        ox = int(pdata.get('x', 0) * sx)
-                        oy = int(pdata.get('y', 0) * sy)
-                        pygame.draw.circle(minimap, (255, 80, 80), (ox, oy), 4)
-                        pygame.draw.circle(minimap, (40, 0, 0), (ox, oy), 5, 1)
                     continue
                 ox = int(pdata.get('x', 0) * sx)
                 oy = int(pdata.get('y', 0) * sy)
@@ -1187,6 +1266,214 @@ class GameUI:
         pygame.draw.circle(minimap, (255, 255, 255), (ppx, ppy), 6, 1)
 
         self.screen.blit(minimap, (mx, my))
+
+    def _render_ai_debug(self):
+        if not getattr(self.game_map, 'show_ai_debug', False):
+            return
+
+        zoom = getattr(self.game_map, 'zoom', 1.0)
+        tile_w = float(getattr(self.game_map, 'tile_width', 32) or 32)
+        tile_h = float(getattr(self.game_map, 'tile_height', 32) or 32)
+
+        def world_to_screen(wx, wy):
+            return int((float(wx) - self.camera_x) * zoom), int((float(wy) - self.camera_y) * zoom)
+
+        def draw_heading(cx, cy, angle_deg, length, color, width=2):
+            rad = math.radians(float(angle_deg))
+            ex = int(cx + math.cos(rad) * length)
+            ey = int(cy + math.sin(rad) * length)
+            pygame.draw.line(self.screen, color, (cx, cy), (ex, ey), width)
+            pygame.draw.circle(self.screen, color, (ex, ey), 3)
+
+        def heading_label(angle_deg):
+            idx = int(round((float(angle_deg) % 360.0) / 90.0)) % 4
+            return ("E", "S", "W", "N")[idx]
+
+        def fmt_value(value):
+            if isinstance(value, float):
+                return f"{value:.1f}"
+            if isinstance(value, bool):
+                return "1" if value else "0"
+            if isinstance(value, (list, tuple)):
+                items = list(value)
+                out = [fmt_value(v) for v in items[:4]]
+                if len(items) > 4:
+                    out.append("...")
+                return "[" + ",".join(out) + "]"
+            if value is None:
+                return "none"
+            return str(value)
+
+        for player_username, player_data in self.other_players.items():
+            if not isinstance(player_data, dict) or not player_data.get('ai', False):
+                continue
+
+            x = float(player_data.get('x', 0.0) or 0.0)
+            y = float(player_data.get('y', 0.0) or 0.0)
+            cx, cy = world_to_screen(x + self.player.size * 0.5, y + self.player.size * 0.5)
+
+            if cx < -80 or cy < -80 or cx > self.screen_width + 80 or cy > self.screen_height + 80:
+                continue
+
+            ai_dbg = player_data.get('debug_ai')
+            if not isinstance(ai_dbg, dict):
+                ai_dbg = {}
+
+            debug_path = player_data.get('debug_path', [])
+            if isinstance(debug_path, list) and len(debug_path) >= 1:
+                points = []
+                for point in debug_path:
+                    if isinstance(point, (list, tuple)) and len(point) >= 2:
+                        px = float(point[0])
+                        py = float(point[1])
+                        points.append(world_to_screen(px, py))
+                if len(points) >= 2:
+                    pygame.draw.lines(self.screen, (255, 210, 80), False, points, 2)
+                    for idx, pt in enumerate(points):
+                        pygame.draw.circle(self.screen, (255, 210, 80), pt, 4, 1)
+                        if idx < 6:
+                            draw_text_bg(
+                                self.screen,
+                                str(idx),
+                                self.hud_font_small,
+                                (255, 215, 150),
+                                pt[0] + 4,
+                                pt[1] - 10,
+                                bg=(0, 0, 0, 120),
+                                padding=2,
+                            )
+
+            target = player_data.get('debug_target')
+            if isinstance(target, dict) and 'x' in target and 'y' in target:
+                tx, ty = world_to_screen(float(target['x']), float(target['y']))
+                pygame.draw.line(self.screen, (255, 120, 40), (cx, cy), (tx, ty), 2)
+                pygame.draw.circle(self.screen, (255, 120, 40), (tx, ty), 5, 2)
+                pygame.draw.circle(self.screen, (10, 10, 10), (tx, ty), 6, 1)
+
+            waypoint = player_data.get('debug_waypoint')
+            if isinstance(waypoint, dict) and 'x' in waypoint and 'y' in waypoint:
+                wx, wy = world_to_screen(float(waypoint['x']), float(waypoint['y']))
+                pygame.draw.circle(self.screen, (120, 220, 255), (wx, wy), 4, 1)
+
+            current_angle = float(player_data.get('angle', 0.0) or 0.0)
+            draw_heading(cx, cy, current_angle, 24, (80, 220, 255), 2)
+
+            desired_angle = ai_dbg.get('desired_angle')
+            if isinstance(desired_angle, (int, float)):
+                draw_heading(cx, cy, float(desired_angle), 20, (255, 120, 255), 2)
+
+            desired_heading = ai_dbg.get('desired_heading')
+            if isinstance(desired_heading, (int, float)):
+                draw_heading(cx, cy, float(desired_heading), 16, (255, 190, 90), 1)
+
+            corridor_heading = player_data.get('debug_corridor_heading')
+            if isinstance(corridor_heading, (int, float)):
+                draw_heading(cx, cy, float(corridor_heading), 28, (120, 255, 120), 1)
+
+            tile = ai_dbg.get('road_tile')
+            if isinstance(tile, (list, tuple)) and len(tile) >= 2:
+                tx = int(float(tile[0]))
+                ty = int(float(tile[1]))
+                rx, ry = world_to_screen(tx * tile_w, ty * tile_h)
+                rw = max(1, int(tile_w * zoom))
+                rh = max(1, int(tile_h * zoom))
+                pygame.draw.rect(self.screen, (110, 170, 255), pygame.Rect(rx, ry, rw, rh), 1)
+
+                tcx, tcy = world_to_screen(tx * tile_w + tile_w * 0.5, ty * tile_h + tile_h * 0.5)
+                open_headings = ai_dbg.get('open_headings', [])
+                if isinstance(open_headings, (list, tuple)):
+                    ray_len = max(6, int(min(rw, rh) * 0.45))
+                    for heading in open_headings:
+                        if isinstance(heading, (int, float)):
+                            draw_heading(tcx, tcy, float(heading), ray_len, (120, 255, 140), 1)
+
+            ai_id = str(player_username).split(':', 1)[-1]
+            kind = str(player_data.get('ai_kind', '')).upper()
+            state = str(player_data.get('ai_state', '')).upper()
+
+            debug_lines = [f"{kind} {state} {ai_id}"]
+
+            mode = ai_dbg.get('mode')
+            phase = ai_dbg.get('phase')
+            if mode is not None or phase is not None:
+                debug_lines.append(f"mode={fmt_value(mode)} phase={fmt_value(phase)}")
+
+            speed = ai_dbg.get('speed', player_data.get('debug_speed'))
+            desired_speed = ai_dbg.get('desired_speed')
+            if isinstance(speed, (int, float)) and isinstance(desired_speed, (int, float)):
+                debug_lines.append(f"spd={float(speed):.1f} -> {float(desired_speed):.1f}")
+            elif isinstance(speed, (int, float)):
+                debug_lines.append(f"spd={float(speed):.1f}")
+
+            if isinstance(desired_heading, (int, float)):
+                debug_lines.append(
+                    f"head={heading_label(current_angle)}->{heading_label(float(desired_heading))}"
+                )
+
+            front_wall = ai_dbg.get('front_wall')
+            front_blocker = ai_dbg.get('front_blocker')
+            if isinstance(front_wall, (int, float)) or front_blocker is not None:
+                debug_lines.append(
+                    f"wall={fmt_value(front_wall)} block={fmt_value(front_blocker)}"
+                )
+
+            path_idx = player_data.get('debug_path_index', ai_dbg.get('path_index'))
+            path_len = player_data.get('debug_path_len', ai_dbg.get('path_len'))
+            if path_idx is not None or path_len is not None:
+                debug_lines.append(f"path={fmt_value(path_idx)}/{fmt_value(path_len)}")
+
+            open_headings = ai_dbg.get('open_headings')
+            if isinstance(open_headings, (list, tuple)) and open_headings:
+                labels = [heading_label(h) for h in open_headings if isinstance(h, (int, float))]
+                if labels:
+                    debug_lines.append("open=" + ",".join(labels))
+
+            shown = {
+                'mode',
+                'phase',
+                'speed',
+                'desired_speed',
+                'desired_heading',
+                'front_wall',
+                'front_blocker',
+                'path_index',
+                'path_len',
+                'open_headings',
+                'road_tile',
+            }
+            for key in sorted(ai_dbg.keys()):
+                if key in shown:
+                    continue
+                debug_lines.append(f"{key}={fmt_value(ai_dbg.get(key))}")
+
+            label_x = cx + 10
+            if label_x > self.screen_width - 280:
+                label_x = cx - 280
+            label_y = cy - 20
+            if label_y < 6:
+                label_y = 6
+
+            for line in debug_lines:
+                if label_y > self.screen_height - 16:
+                    break
+                draw_text_bg(
+                    self.screen,
+                    line,
+                    self.hud_font_small,
+                    (255, 255, 210),
+                    int(label_x),
+                    int(label_y),
+                    bg=(0, 0, 0, 155),
+                    padding=3,
+                )
+                label_y += self.hud_font_small.get_height() + 3
+
+            if isinstance(target, dict) and 'x' in target and 'y' in target:
+                tx = float(target['x'])
+                ty = float(target['y'])
+                dist = math.hypot((tx - x), (ty - y))
+                desc = f"dist {int(dist)}"
+                draw_text_bg(self.screen, desc, self.hud_font_small, (255, 190, 120), cx + 8, cy + 4, bg=(0, 0, 0, 150), padding=3)
 
     def _render_drift_trail(self):
         """Render tire marks on the ground from drifting as pixelated lines."""
@@ -1254,7 +1541,32 @@ class GameUI:
         if ms.active_mission:
             am = ms.active_mission
             objective = ms.get_current_objective() if hasattr(ms, 'get_current_objective') else None
-            if objective:
+            is_party_choices = bool(getattr(am, 'party_mission', False) and getattr(am, 'picked_up', False))
+
+            if is_party_choices:
+                start_idx = max(0, int(getattr(am, 'current_stop_index', 0) or 0))
+                for offset, stop in enumerate(getattr(am, 'stops', [])[start_idx:]):
+                    kind = str(stop.get('kind', 'pickup'))
+                    marker_kind = 'dropoff' if kind == 'dropoff' else 'pickup'
+                    color = (255, 80, 80) if kind == 'dropoff' else (0, 255, 120)
+                    if kind == 'stop':
+                        color = (80, 180, 255)
+
+                    is_primary = (offset == 0)
+                    label = str(stop.get('name', 'Objectif')).upper()
+                    icon = str(stop.get('cargo_icon', getattr(am, 'cargo_icon', 'PKG')))
+                    self._draw_world_marker(
+                        float(stop.get('x', am.pickup['x'])),
+                        float(stop.get('y', am.pickup['y'])),
+                        color,
+                        label,
+                        18 if is_primary else 14,
+                        icon_text=icon,
+                        marker_kind=marker_kind,
+                        cargo_type=stop.get('cargo_type', getattr(am, 'cargo_type', 'colis')),
+                        pulse=is_primary,
+                    )
+            elif objective:
                 kind = str(objective.get('kind', 'pickup'))
                 marker_kind = 'dropoff' if kind == 'dropoff' else 'pickup'
                 color = (255, 80, 80) if kind == 'dropoff' else (0, 255, 120)

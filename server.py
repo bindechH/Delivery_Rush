@@ -24,7 +24,8 @@ SERVER_PORT = 12345
 HEARTBEAT_TIMEOUT = 5  # secondes avant de considérer un client mort
 BROADCAST_RATE = 30    # paquets par seconde pour pousser l'état du monde
 TICK_SLEEP = 0.003     # petit sleep pour garder la charge raisonnable
-BUFFER_SIZE = 8192
+# 64 KiB socket read buffer for UDP payloads.
+BUFFER_SIZE = 65535
 ROOT_DIR = Path(__file__).resolve().parent
 DATA_DIR = ROOT_DIR / "server_data"
 DATA_DIR.mkdir(exist_ok=True)
@@ -43,6 +44,8 @@ SERVER_BOT_PREFIX = "BOT"
 SERVER_MAP_PATH = ROOT_DIR / "assets" / "map" / "maps" / "deliveryrush_map.tmx"
 PLAYER_SIZE = 134.0
 PLAYER_HITBOX_SCALE = 0.175
+DEFAULT_SPAWN_X = 2699.0
+DEFAULT_SPAWN_Y = 1341.0
 SERVER_HEAVY_MODELS = ("PICKUP", "VAN", "BOX TRUCK", "MEDIUM TRUCK")
 SERVER_EXPRESS_MODELS = ("COUPE", "MUSCLECAR", "SPORT", "SUPERCAR", "LUXURY")
 SERVER_RISKY_TYPE_BASE_CHANCE = {
@@ -374,8 +377,8 @@ class DeliveryRushServer:
             'last_vehicle_class': 'compact',
             'audio_settings': {'music_state': 'menu'},
             'total_distance': 0.0,
-            'last_x': 6000,
-            'last_y': 6000,
+            'last_x': DEFAULT_SPAWN_X,
+            'last_y': DEFAULT_SPAWN_Y,
             'last_angle': 0.0,
         }
 
@@ -481,6 +484,41 @@ class DeliveryRushServer:
             points.append((px, py))
         return points
 
+    def _active_robber_focus_points(self) -> List[Tuple[float, float]]:
+        """Joueurs à cibler par les braqueurs IA (missions risquées/party actives)."""
+        center_offset = PLAYER_SIZE * 0.5
+        targeted_users: List[str] = []
+
+        for mission in self.server_missions:
+            if str(mission.get('status', '')) != 'active':
+                continue
+
+            risk_level = str(mission.get('risk_level', 'chill') or 'chill').lower()
+            party_mode = bool(mission.get('party_mission', False))
+            if risk_level != 'risky' and not party_mode:
+                continue
+
+            participants = [str(p) for p in (mission.get('participants', []) or []) if str(p)]
+            if not participants:
+                accepted_by = str(mission.get('accepted_by', '') or '').strip()
+                if accepted_by:
+                    participants = [accepted_by]
+
+            for username in participants:
+                if username in self.clients and username not in targeted_users:
+                    targeted_users.append(username)
+
+        focus_points: List[Tuple[float, float]] = []
+        for username in targeted_users:
+            pdata = self.clients.get(username)
+            if not pdata:
+                continue
+            px = float(pdata.get('x', 0.0) or 0.0) + center_offset
+            py = float(pdata.get('y', 0.0) or 0.0) + center_offset
+            focus_points.append((px, py))
+
+        return focus_points
+
     def _tick_server_ai(self):
         """Fait avancer l'IA serveur à fréquence fixe pour limiter la charge CPU."""
         if not self.ai_manager or not self.server_map:
@@ -496,6 +534,15 @@ class DeliveryRushServer:
         steps = 0
         player_obstacles = self._build_player_obstacle_rects()
         player_focus_points = self._build_player_focus_points()
+        robber_focus_points = self._active_robber_focus_points()
+        robber_target_count = min(12, max(0, len(robber_focus_points) * 2))
+        self.ai_manager.ensure_robbers(
+            self.server_map,
+            target_count=robber_target_count,
+            focus_points=robber_focus_points,
+            enabled=robber_target_count > 0,
+        )
+
         while self._ai_accumulator >= self._ai_tick_interval and steps < AI_MAX_STEPS_PER_LOOP:
             self.bot_entities = self.ai_manager.update_all(
                 self._ai_tick_interval,
@@ -622,16 +669,16 @@ class DeliveryRushServer:
             return
 
         # Accepter la connexion
-        saved_x = 6000
-        saved_y = 6000
+        saved_x = DEFAULT_SPAWN_X
+        saved_y = DEFAULT_SPAWN_Y
         saved_angle = 0.0
         saved_car = car
         if username in self.player_data:
             pd = self._merge_player_defaults(self.player_data[username], car=car)
             pd['unlock_state'] = self._unlock_state_from_reputation(pd.get('reputation', 0))
             self.player_data[username] = pd
-            saved_x = pd.get('last_x', 6000)
-            saved_y = pd.get('last_y', 6000)
+            saved_x = pd.get('last_x', DEFAULT_SPAWN_X)
+            saved_y = pd.get('last_y', DEFAULT_SPAWN_Y)
             saved_angle = pd.get('last_angle', 0.0)
             saved_car_m = pd.get('car_model')
             saved_car_c = pd.get('car_color')
@@ -667,8 +714,8 @@ class DeliveryRushServer:
                 'mission_stats': pd.get('mission_stats', {}),
                 'last_vehicle_class': pd.get('last_vehicle_class', 'compact'),
                 'audio_settings': pd.get('audio_settings', {'music_state': 'menu'}),
-                'last_x': pd.get('last_x', 6000),
-                'last_y': pd.get('last_y', 6000),
+                'last_x': pd.get('last_x', DEFAULT_SPAWN_X),
+                'last_y': pd.get('last_y', DEFAULT_SPAWN_Y),
                 'last_angle': pd.get('last_angle', 0.0),
                 'total_distance': pd.get('total_distance', 0.0),
             }
@@ -825,9 +872,36 @@ class DeliveryRushServer:
 
         # Ajouter les bots autoritaires du serveur.
         if self.bot_entities:
-            players.update(AIManager.entities_to_other_players(self.bot_entities, prefix=SERVER_BOT_PREFIX))
+            bot_players = AIManager.entities_to_other_players(self.bot_entities, prefix=SERVER_BOT_PREFIX)
+            compact_bots = {}
+            for bot_name, payload in bot_players.items():
+                if not isinstance(payload, dict):
+                    continue
+                compact_bots[bot_name] = {
+                    'x': float(payload.get('x', 0.0) or 0.0),
+                    'y': float(payload.get('y', 0.0) or 0.0),
+                    'angle': float(payload.get('angle', 0.0) or 0.0),
+                    'car': payload.get('car', ('MICRO', 'White')),
+                    'on_road': bool(payload.get('on_road', True)),
+                    'ai': True,
+                    'ai_kind': str(payload.get('ai_kind', 'traffic') or 'traffic'),
+                    'ai_state': str(payload.get('ai_state', 'driving') or 'driving'),
+                    'vehicle_class': str(payload.get('vehicle_class', '') or ''),
+                }
+            players.update(compact_bots)
 
-        packet = json.dumps({'type': 'state_broadcast', 'players': players}).encode()
+        packet_payload = {'type': 'state_broadcast', 'players': players}
+        packet = json.dumps(packet_payload).encode()
+
+        # Hard guard: if packet is still huge, drop AI entries for this tick.
+        if len(packet) > 60000:
+            players = {
+                username: pdata
+                for username, pdata in players.items()
+                if not (isinstance(pdata, dict) and bool(pdata.get('ai', False)))
+            }
+            packet = json.dumps({'type': 'state_broadcast', 'players': players}).encode()
+
         # Envoi à tous les clients
         for username, data in list(self.clients.items()):
             addr = data['addr']
@@ -1417,6 +1491,27 @@ class DeliveryRushServer:
         stops.append({'name': delivery['name'], 'x': delivery['x'], 'y': delivery['y'], 'kind': 'dropoff'})
         return stops
 
+    def _build_party_route_stops(self, pickup: Dict[str, Any], delivery: Dict[str, Any], participant_count: int) -> List[Dict[str, Any]]:
+        """Construit plusieurs points de livraison (environ un par joueur de la party)."""
+        count = max(2, int(participant_count or 2))
+        drop_count = max(2, min(6, count))
+        stops = [
+            {'name': pickup['name'], 'x': pickup['x'], 'y': pickup['y'], 'kind': 'pickup'},
+        ]
+
+        excluded = {pickup['name'], delivery['name']}
+        candidates = [loc for loc in SERVER_LOCATIONS if loc['name'] not in excluded]
+        random.shuffle(candidates)
+        dropoffs = [
+            {'name': delivery['name'], 'x': delivery['x'], 'y': delivery['y'], 'kind': 'dropoff'}
+        ]
+        for stop in candidates[: max(0, drop_count - 1)]:
+            dropoffs.append({'name': stop['name'], 'x': stop['x'], 'y': stop['y'], 'kind': 'dropoff'})
+
+        random.shuffle(dropoffs)
+        stops.extend(dropoffs)
+        return stops
+
     @staticmethod
     def _default_required_roles(mission_type: str) -> List[str]:
         if mission_type == 'express':
@@ -1489,12 +1584,29 @@ class DeliveryRushServer:
                     mission['required_players'] = len(participants)
                     mission['participants'] = participants
                     mission['mission_ready'] = True
+                    mission['party_id'] = party_id
+                    mission['party_mission'] = True
+
+                    mission['stops'] = self._build_party_route_stops(
+                        mission.get('pickup', {}),
+                        mission.get('delivery', {}),
+                        len(participants),
+                    )
+                    mission['current_stop_index'] = 0
+                    mission['risk_level'] = 'risky'
+
+                    base_reward = int(mission.get('base_reward', mission.get('reward', 0)) or 0)
+                    if base_reward <= 0:
+                        base_reward = int(mission.get('reward', 0) or 0)
+                    mission['base_reward'] = base_reward
+                    mission['party_bonus_multiplier'] = 1.5
+                    mission['reward'] = int(round(base_reward * 1.5))
+
+                    base_time = int(mission.get('time_limit', 0) or 0)
+                    party_time = int(round(base_time * 1.35 + len(participants) * 25))
+                    mission['time_limit'] = max(base_time, party_time)
 
                     party_challenge = self._start_party_challenge(party_id, username, participants)
-
-                    # Large reward bump for coordinated coop runs.
-                    boost = 1.0 + 0.55 * (len(participants) - 1)
-                    mission['reward'] = int(float(mission.get('reward', 0) or 0.0) * boost)
 
                     coop_packet = json.dumps({
                         'type': 'coop_activated',
@@ -1809,8 +1921,8 @@ class DeliveryRushServer:
 
                 stops = self._build_server_stops(mission_type, pickup, delivery)
 
-                # 20% chance de coop si 2+ joueurs connectés
-                is_coop = len(self.clients) >= 2 and random.random() < 0.2
+                # Les missions partagées sont déclenchées via le système de party (leader only).
+                is_coop = False
                 required_roles = self._default_required_roles(mission_type) if is_coop else []
 
                 if mission_type == 'express':
@@ -1829,8 +1941,7 @@ class DeliveryRushServer:
                     reward = int(reward * 1.24)
                     time_limit = max(35.0, time_limit * 0.86)
 
-                if is_coop:
-                    reward = int(reward * 1.5)  # Bonus récompense coop
+                base_reward = int(reward)
 
                 self._mission_counter += 1
                 mission = {
@@ -1838,7 +1949,8 @@ class DeliveryRushServer:
                     'type': mission_type,
                     'pickup': pickup,
                     'delivery': delivery,
-                    'reward': reward,
+                    'reward': base_reward,
+                    'base_reward': base_reward,
                     'time_limit': int(time_limit),
                     'status': 'available',
                     'coop': is_coop,
@@ -1846,6 +1958,8 @@ class DeliveryRushServer:
                     'required_roles': required_roles,
                     'participant_roles': {},
                     'mission_ready': not is_coop,
+                    'party_mission': False,
+                    'party_bonus_multiplier': 1.0,
                     'requirements': requirements,
                     'cargo_type': str(cargo.get('cargo_type', 'colis')),
                     'cargo_icon': str(cargo.get('cargo_icon', 'PKG')),

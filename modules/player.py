@@ -10,8 +10,8 @@ from typing import Any, Dict, List, Tuple
 import pygame
 
 # === CONSTANTES DU JOUEUR === (30px = 1 metre)
-PLAYER_START_X = 6000
-PLAYER_START_Y = 6000
+PLAYER_START_X = 2699.0
+PLAYER_START_Y = 1341.0
 PLAYER_SIZE = 134
 HITBOX_SCALE = 0.175
 
@@ -31,10 +31,7 @@ STOP_THRESHOLD = 8.0
 BURNOUT_TURN_SPEED = 180.0   # Rotation sur place (frein à main)
 
 # === PHYSIQUE DU DRIFT ===
-TIRE_GRIP_OFFROAD_MULT = 0.55
 TIRE_GRIP_HANDBRAKE_MULT = 0.22
-OFFROAD_DRAG_MULT = 1.4      # Réduit de 2.0 pour permettre marche arrière
-OFFROAD_SPEED_MULT = 0.65
 COLLISION_BOUNCE = -0.3
 COLLISION_SPEED_LOSS = 0.5
 
@@ -104,9 +101,9 @@ VEHICLE_TAGS_BY_CLASS = {
 }
 
 VEHICLE_TAGS_BY_MODEL = {
-    "SUV": ["offroad"],
-    "JEEP": ["offroad"],
-    "PICKUP": ["offroad", "cargo"],
+    "SUV": [],
+    "JEEP": [],
+    "PICKUP": ["cargo"],
     "BOX TRUCK": ["heavy", "bulk"],
     "MEDIUM TRUCK": ["heavy", "industrial"],
     "SPORT": ["race"],
@@ -229,7 +226,6 @@ class Player:
         self.distance_traveled = 0.0  # pixels parcourus
         self.drift_trail = []  # [(world_x, world_y, life)]
         self.collision_count = 0
-        self.offroad_time = 0.0
         self.drift_time = 0.0
         self.mission_time = 0.0
         self._speed_samples = 0
@@ -265,15 +261,8 @@ class Player:
         reverse_input = keys[pygame.K_s]
         self.handbrake = keys[pygame.K_SPACE]
 
-        # === DÉTECTION DE SURFACE ===
-        if game_map:
-            center_x = self.x + self.size / 2
-            center_y = self.y + self.size / 2
-            self.on_road = game_map.is_road_at(center_x, center_y)
-
         self.mission_time += dt
-        if not self.on_road:
-            self.offroad_time += dt
+        self.on_road = True
 
         # === VITESSE ET DIRECTION ACTUELLE ===
         speed = math.hypot(self.vx, self.vy)
@@ -341,8 +330,6 @@ class Player:
             base_grip = self.grip
             if self.handbrake:
                 grip = base_grip * TIRE_GRIP_HANDBRAKE_MULT
-            elif not self.on_road:
-                grip = base_grip * TIRE_GRIP_OFFROAD_MULT
             else:
                 grip = base_grip
 
@@ -391,8 +378,7 @@ class Player:
         # === RÉSISTANCE DE L'AIR (traînée) ===
         speed = math.hypot(self.vx, self.vy)
         if speed > 0:
-            drag_mult = OFFROAD_DRAG_MULT if not self.on_road else 1.0
-            drag_mag = self.drag * drag_mult * dt
+            drag_mag = self.drag * dt
             new_speed = max(0.0, speed - drag_mag)
             if new_speed == 0:
                 self.vx = self.vy = 0.0
@@ -407,8 +393,7 @@ class Player:
             rad = math.radians(self.angle)
             forward_vel = self.vx * math.cos(rad) + self.vy * math.sin(rad)
             base_limit = self.max_speed if forward_vel >= 0 else self.rev_speed
-            speed_mult = OFFROAD_SPEED_MULT if not self.on_road else 1.0
-            limit = base_limit * speed_mult
+            limit = base_limit
             if speed > limit:
                 scale = limit / speed
                 self.vx *= scale
@@ -549,7 +534,6 @@ class Player:
     def reset_mission_telemetry(self):
         """Réinitialise les compteurs gameplay utilisés pour le score de mission."""
         self.collision_count = 0
-        self.offroad_time = 0.0
         self.drift_time = 0.0
         self.mission_time = 0.0
         self._speed_samples = 0
@@ -562,7 +546,6 @@ class Player:
             avg_speed = self._speed_accumulator / float(self._speed_samples)
         return {
             "collision_count": int(self.collision_count),
-            "offroad_time": float(self.offroad_time),
             "drift_time": float(self.drift_time),
             "avg_speed_kmh": float(avg_speed),
             "mission_time": float(self.mission_time),

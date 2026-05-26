@@ -2,7 +2,7 @@
 
 Un jeu de livraison arcade multijoueur en vue du dessus (top-down). Livrez des colis à travers la ville, maîtrisez le drift, achetez de nouvelles voitures et affrontez d'autres joueurs.
 
-**Équipe** : Rayane (bindech), François, Mohamed (Boulanouar), Abdallah — L3.1 G4 EPITA Promo 2026
+**Équipe** : Rayane (bindech), François, Mohamed (Boulanouar) — L3.1 G4 EPITA Promo 2030
 
 ## 🎮 Fonctionnalités
 
@@ -11,12 +11,13 @@ Un jeu de livraison arcade multijoueur en vue du dessus (top-down). Livrez des c
 - **17 véhicules** différents (MICRO à SUPERCAR) avec stats uniques
 - **Système de drift avancé** avec adhérence variable, handbrake, survirage haute vitesse
 - **Physique réaliste** : accélération, freinage, traînée, collisions
-- **2 types de surface** : route et hors-route (friction différente)
 - **Système de missions** : 3 types (standard, express, chain), 40+ emplacements, timer, récompenses
+- **Missions party coop** : leader-only, bonus party, objectifs multi-points
+- **Braqueurs IA** sur missions risquées (pression/échec si encerclement)
 
 ### Interface
 - **Menu principal** avec sélection solo/multijoueur
-- **Téléphone in-game** (slide-up) : applications Livraisons, GPS, Boutique, Garage, Stats
+- **Téléphone in-game** (slide-up) : applications Livraisons, GPS, Boutique, Wiki, Stats, Party
 - **GPS complet** affichant la carte, missions et position joueur
 - **Boutique** : achat de véhicules en fonction de l'argent gagné
 - **Garage** : sélection de couleur pour chaque voiture
@@ -27,15 +28,18 @@ Un jeu de livraison arcade multijoueur en vue du dessus (top-down). Livrez des c
 - **Synchronisation réseau** en temps réel
 - **Liste des joueurs** (touche TAB)
 - **Sauvegarde serveur** du progrès (argent, véhicules, stats)
+- **Système de party** (jusqu'à 3 joueurs)
+- **Missions partagées** : seul le leader lance, tous les membres reçoivent la mission
+- **Braqueurs synchronisés** visibles sur la route pour tous les joueurs
 
 ### Paramètres
-- **Résolution configurable** (1920×1080 par défaut)
+- **Résolution configurable** (1280×720 par défaut)
 - **Fullscreen** (F11)
 - **Zoom de carte** ajustable en paramètres
 - **Volume de musique** réglable
 
 ### Debug
-- **Touche C** : Affiche les rectangles de collision (rouge) et hitbox (vert)
+- **Touche C** : active/désactive le mode debug (collisions + debug IA)
 - **Touche TAB** : Liste des joueurs en ligne
 
 ## 📋 Configuration
@@ -43,7 +47,7 @@ Un jeu de livraison arcade multijoueur en vue du dessus (top-down). Livrez des c
 Modifiez `config.json` :
 ```json
 {
-  "resolution": [1920, 1080],
+  "resolution": [1280, 720],
   "fullscreen": false,
   "fps": 60,
   "map_zoom": 2.0,
@@ -98,7 +102,7 @@ Sélectionnez "SOLO" au menu.
 | **ESPACE** | Frein à main (handbrake) |
 | **UP** | Ouvrir/fermer le téléphone |
 | **TAB** | Liste des joueurs |
-| **C** | Toggle debug collision |
+| **C** | Toggle debug (collision + IA) |
 | **F11** | Toggle fullscreen |
 | **ESC** | Retour au menu |
 
@@ -163,7 +167,14 @@ Chaque véhicule possède 8 coloris uniques et des stats différentes (vitesse m
 1. Authentification avec identifiant/mot de passe
 2. Envoi régulier de position au serveur
 3. Réception des positions autres joueurs (30 fps)
-4. Synchronisation mission et données (si joueur maître)
+4. Synchronisation missions/données de progression
+5. IA serveur autoritaire (trafic + braqueurs) diffusée aux clients
+
+### Party coop
+- **Création/join de party** (max 3 joueurs)
+- **Leader-only start** : seul le leader peut démarrer une mission partagée
+- **Objectifs multi-drop** : plusieurs livraisons apparaissent, les joueurs choisissent la destination qu'ils veulent prendre
+- **Bonus party** : multiplicateur de récompense appliqué aux runs coop
 
 ## 📊 Stats & Progression
 
@@ -179,6 +190,17 @@ Appuyez sur **C** pendant le jeu pour activer le debug collision display.
 
 ### Logs
 Vérifiez la console pour les traces réseau, chargement assets, erreurs.
+
+### Erreur WinError 10040 (UDP datagram trop gros)
+Si le client affiche une erreur de réception UDP trop grande :
+- vérifiez que vous lancez bien le serveur avec la version à jour du repo
+- redémarrez serveur + client
+- évitez d'avoir plusieurs serveurs simultanés sur le même port
+
+### Erreur WinError 10048 (port déjà utilisé)
+Le port UDP `12345` est déjà occupé par un autre processus.
+- fermez l'ancien serveur
+- ou changez `server_port` dans `config.json` et relancez serveur + client avec le même port
 
 ### Réinitialiser sauvegarde
 Supprimez `solo_save.json` pour recommencer en solo.

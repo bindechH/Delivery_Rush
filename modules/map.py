@@ -57,8 +57,9 @@ class GameMap:
         self.width_px = self.map_width_tiles * self.tile_width
         self.height_px = self.map_height_tiles * self.tile_height
 
-        # Debug collision display
+        # Debug display modes
         self.show_collisions = False
+        self.show_ai_debug = False
 
         # Actual camera position after pyscroll's clamping (set in render())
         self.actual_camera_x = 0
@@ -323,9 +324,21 @@ class GameMap:
 
     def draw_collisions(self, screen, camera_x, camera_y):
         """
-        Affiche les rectangles de collision en rouge (debug)
+        Affiche les rectangles de collision en rouge (debug).
+        Only draw rectangles inside the visible viewport to reduce lag.
         """
+        screen_w = screen.get_width()
+        screen_h = screen.get_height()
+        visible_world_rect = pygame.Rect(
+            int(camera_x),
+            int(camera_y),
+            int(screen_w / max(1.0, self.zoom)),
+            int(screen_h / max(1.0, self.zoom)),
+        )
+
         for rect in self.collision_rects:
+            if not rect.colliderect(visible_world_rect):
+                continue
 
             debug_rect = pygame.Rect(
                 int((rect.x - camera_x) * self.zoom),
@@ -333,6 +346,5 @@ class GameMap:
                 int(rect.width * self.zoom),
                 int(rect.height * self.zoom)
             )
-
             pygame.draw.rect(screen, (255, 0, 0), debug_rect, 2)
 
