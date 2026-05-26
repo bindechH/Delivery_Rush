@@ -11,20 +11,20 @@ Un jeu de livraison arcade multijoueur en vue du dessus (top-down). Livrez des c
 - **17 véhicules** différents (MICRO à SUPERCAR) avec stats uniques
 - **Système de drift avancé** avec adhérence variable, handbrake, survirage haute vitesse
 - **Physique réaliste** : accélération, freinage, traînée, collisions
-- **Système de missions** : 3 types (standard, express, chain), 40+ emplacements, timer, récompenses
-- **Missions party coop** : leader-only, bonus party, objectifs multi-points
+- **Système de missions** : 3 types (standard, express, chain), 150+ emplacements nommés, timer, récompenses dynamiques
+- **Missions party coop** : leader-only, défi party serveur, objectifs multi-points
 - **Braqueurs IA** sur missions risquées (pression/échec si encerclement)
 
 ### Interface
 - **Menu principal** avec sélection solo/multijoueur
-- **Téléphone in-game** (slide-up) : applications Livraisons, GPS, Boutique, Wiki, Stats, Party
+- **Téléphone in-game** (slide-up) : applications Livraisons, GPS, Boutique, Wiki, Stats (+ Party/Top10 en multi)
 - **GPS complet** affichant la carte, missions et position joueur
 - **Boutique** : achat de véhicules en fonction de l'argent gagné
 - **Garage** : sélection de couleur pour chaque voiture
 - **Notations et HUD** : vitesse (km/h), distance parcourue, récompenses
 
 ### Multijoueur
-- **Mode UDP*** : jusqu'à 8 joueurs simultanés
+- **Mode UDP** : synchronisation temps réel des joueurs et des IA serveur
 - **Synchronisation réseau** en temps réel
 - **Liste des joueurs** (touche TAB)
 - **Sauvegarde serveur** du progrès (argent, véhicules, stats)
@@ -36,7 +36,9 @@ Un jeu de livraison arcade multijoueur en vue du dessus (top-down). Livrez des c
 - **Résolution configurable** (1280×720 par défaut)
 - **Fullscreen** (F11)
 - **Zoom de carte** ajustable en paramètres
-- **Volume de musique** réglable
+- **Volumes musique + effets** réglables
+- **Difficulté des braqueurs** configurable (1 à 10)
+- **Langue FR/EN** configurable
 
 ### Debug
 - **Touche C** : active/désactive le mode debug (collisions + debug IA)
@@ -51,11 +53,16 @@ Modifiez `config.json` :
   "fullscreen": false,
   "fps": 60,
   "map_zoom": 2.0,
-  "server_ip": "127.0.0.1",
+  "volume": 0.25,
+  "music_volume": 0.25,
+  "effects_volume": 0.75,
+  "robber_difficulty": 4,
+  "language": "fr",
+  "server_ip": "play.deliveryrush.lol",
   "server_port": 12345,
   "multi": {
-    "username": "YourUsername",
-    "password": "YourPassword"
+    "username": "",
+    "password": ""
   }
 }
 ```
@@ -116,13 +123,16 @@ Sélectionnez "SOLO" au menu.
 ├── solo_save.json          # Sauvegarde solo
 ├── requirements.txt        # Dépendances
 ├── modules/
+│   ├── __init__.py        # Export des classes/modules
+│   ├── ia.py              # IA trafic + braqueurs + navigation
 │   ├── player.py          # Classe joueur + physique + drift
 │   ├── map.py             # Rendu Tiled + collisions
 │   ├── missions.py        # Système de missions
 │   ├── network.py         # Client/serveur UDP
 │   ├── rendering.py       # Rendu UI + game loop
 │   ├── phone.py           # Interface smartphone
-│   └── sounds.py          # Gestionnaire audio
+│   ├── sounds.py          # Gestionnaire audio
+│   └── translate.py       # Traductions FR/EN
 ├── assets/
 │   ├── images/
 │   │   ├── cars/          # Sprites 17 véhicules × 8 couleurs
@@ -133,7 +143,8 @@ Sélectionnez "SOLO" au menu.
 │   └── map/
 │       └── maps/
 │           └── deliveryrush_map.tmx  # Carte Tiled
-└── siteweb/               # Site de présentation du projet
+├── server_data/           # Données persistées côté serveur
+└── __pycache__/           # Cache Python local
 ```
 
 ## 🎨 Véhicules
@@ -150,7 +161,7 @@ Chaque véhicule possède 8 coloris uniques et des stats différentes (vitesse m
 
 ## 🗺️ Carte
 
-- **Taille** : 12000×12000 pixels
+- **Taille** : 8192×8192 pixels (512×512 tuiles de 16 px)
 - **Format** : Tiled TMX
 - **Couches** : roads_base (surface), collision_8 (obstacles)
 - **Collisions** : Grid-based avec rect collision pour les véhicules
@@ -161,7 +172,8 @@ Chaque véhicule possède 8 coloris uniques et des stats différentes (vitesse m
 ### Architecture
 - **UDP** : Communication légère et rapide
 - **Sync** : Position, rotation, voiture, états mission
-- **Limitation** : ~8 joueurs généralement (montée en charge non testée)
+- **Cadences serveur** : broadcast 30 Hz, heartbeat timeout 5 s
+- **IA serveur autoritaire** : 8 bots (tick IA 8 Hz)
 
 ### Flux
 1. Authentification avec identifiant/mot de passe
@@ -169,17 +181,19 @@ Chaque véhicule possède 8 coloris uniques et des stats différentes (vitesse m
 3. Réception des positions autres joueurs (30 fps)
 4. Synchronisation missions/données de progression
 5. IA serveur autoritaire (trafic + braqueurs) diffusée aux clients
+6. Interpolation client (delay 0.1 s) pour lisser les mouvements distants
 
 ### Party coop
 - **Création/join de party** (max 3 joueurs)
 - **Leader-only start** : seul le leader peut démarrer une mission partagée
 - **Objectifs multi-drop** : plusieurs livraisons apparaissent, les joueurs choisissent la destination qu'ils veulent prendre
-- **Bonus party** : multiplicateur de récompense appliqué aux runs coop
+- **Défi party serveur** : objectifs et timer adaptés à la taille du groupe
 
 ## 📊 Stats & Progression
 
-- **Argent gagné** : +30/+75/+150$ par mission (standard/express/chain)
-- **Distance parcourue** : Tracée en pixels (30px ≈ 1m réel)
+- **Argent gagné** : calcul dynamique selon type, distance, risque et performance
+- **Plages de base** : standard 100-250, express 200-500, chain 150-350
+- **Distance parcourue** : Tracée et stockée en pixels
 - **Temps jeu** : Visible en session
 - **Sauvegarde** : Auto-save en solo, sync serveur en multijoueur
 
